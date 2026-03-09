@@ -1,0 +1,402 @@
+[
+  {
+    "ticker": "GME",
+    "date": "2026-03-02",
+    "executive_role": "CEO",
+    "action": "SELL",
+    "shares_volume": 5200000,
+    "content": "The CEO executed an open market disposition of 5,200,000 shares."
+  },
+  {
+    "ticker": "GME",
+    "date": "2026-03-06",
+    "executive_role": "CFO",
+    "action": "SELL",
+    "shares_volume": 1100000,
+    "content": "The Chief Financial Officer sold 1,100,000 shares in an open market transaction."
+  },
+  {
+    "ticker": "GME",
+    "date": "2026-03-10",
+    "executive_role": "COO",
+    "action": "SELL",
+    "shares_volume": 800000,
+    "content": "The Chief Operating Officer reported the sale of 800,000 shares."
+  },
+  {
+    "ticker": "GME",
+    "date": "2026-03-15",
+    "executive_role": "Director",
+    "action": "SELL",
+    "shares_volume": 450000,
+    "content": "A member of the Board of Directors liquidated 450,000 shares."
+  },
+  {
+    "ticker": "GME",
+    "date": "2026-03-22",
+    "executive_role": "Chief Accounting Officer",
+    "action": "SELL",
+    "shares_volume": 200000,
+    "content": "The Chief Accounting Officer disposed of 200,000 shares."
+  },
+  {
+    "ticker": "PLTR",
+    "date": "2026-03-03",
+    "executive_role": "CEO",
+    "action": "SELL",
+    "shares_volume": 4500000,
+    "content": "The CEO reported an open market sale of 4,500,000 shares."
+  },
+  {
+    "ticker": "PLTR",
+    "date": "2026-03-07",
+    "executive_role": "CTO",
+    "action": "SELL",
+    "shares_volume": 1800000,
+    "content": "The Chief Technology Officer sold 1,800,000 shares under a 10b5-1 trading plan."
+  },
+  {
+    "ticker": "PLTR",
+    "date": "2026-03-11",
+    "executive_role": "CFO",
+    "action": "SELL",
+    "shares_volume": 900000,
+    "content": "The CFO executed a sale of 900,000 shares."
+  },
+  {
+    "ticker": "PLTR",
+    "date": "2026-03-18",
+    "executive_role": "Chief Revenue Officer",
+    "action": "SELL",
+    "shares_volume": 750000,
+    "content": "The Chief Revenue Officer disposed of 750,000 shares."
+  },
+  {
+    "ticker": "PLTR",
+    "date": "2026-03-25",
+    "executive_role": "Director",
+    "action": "SELL",
+    "shares_volume": 500000,
+    "content": "A Director filed a Form 4 reporting the sale of 500,000 shares."
+  },
+  {
+    "ticker": "JPM",
+    "date": "2026-03-02",
+    "executive_role": "CEO",
+    "action": "BUY",
+    "shares_volume": 250000,
+    "content": "The CEO acquired 250,000 shares in an open market purchase."
+  },
+  {
+    "ticker": "JPM",
+    "date": "2026-03-08",
+    "executive_role": "President",
+    "action": "BUY",
+    "shares_volume": 180000,
+    "content": "The President reported the acquisition of 180,000 shares."
+  },
+  {
+    "ticker": "JPM",
+    "date": "2026-03-12",
+    "executive_role": "CFO",
+    "action": "BUY",
+    "shares_volume": 100000,
+    "content": "The CFO purchased 100,000 shares."
+  },
+  {
+    "ticker": "JPM",
+    "date": "2026-03-19",
+    "executive_role": "COO",
+    "action": "BUY",
+    "shares_volume": 85000,
+    "content": "The Chief Operating Officer executed a buy order for 85,000 shares."
+  },
+  {
+    "ticker": "JPM",
+    "date": "2026-03-28",
+    "executive_role": "Director",
+    "action": "BUY",
+    "shares_volume": 50000,
+    "content": "A Director added 50,000 shares to their direct holdings."
+  },
+  {
+    "ticker": "NEE",
+    "date": "2026-03-04",
+    "executive_role": "CEO",
+    "action": "BUY",
+    "shares_volume": 400000,
+    "content": "The CEO purchased 400,000 shares in the open market."
+  },
+  {
+    "ticker": "NEE",
+    "date": "2026-03-09",
+    "executive_role": "President of Energy Resources",
+    "action": "BUY",
+    "shares_volume": 200000,
+    "content": "The President of Energy Resources acquired 200,000 shares."
+  },
+  {
+    "ticker": "NEE",
+    "date": "2026-03-14",
+    "executive_role": "CFO",
+    "action": "BUY",
+    "shares_volume": 150000,
+    "content": "The CFO executed a transaction acquiring 150,000 shares."
+  },
+  {
+    "ticker": "NEE",
+    "date": "2026-03-21",
+    "executive_role": "Director",
+    "action": "BUY",
+    "shares_volume": 75000,
+    "content": "A Board Member filed a Form 4 for the purchase of 75,000 shares."
+  },
+  {
+    "ticker": "NEE",
+    "date": "2026-03-26",
+    "executive_role": "VP of Strategy",
+    "action": "BUY",
+    "shares_volume": 60000,
+    "content": "The VP of Strategy reported an open market purchase of 60,000 shares."
+  },
+  {
+    "ticker": "NVDA",
+    "date": "2026-03-02",
+    "executive_role": "CEO",
+    "action": "SELL",
+    "shares_volume": 850000,
+    "content": "The CEO disposed of 850,000 shares through an open market sale."
+  },
+  {
+    "ticker": "NVDA",
+    "date": "2026-03-05",
+    "executive_role": "Chief Scientist",
+    "action": "SELL",
+    "shares_volume": 200000,
+    "content": "The Chief Scientist executed a sale of 200,000 shares."
+  },
+  {
+    "ticker": "NVDA",
+    "date": "2026-03-12",
+    "executive_role": "CFO",
+    "action": "SELL",
+    "shares_volume": 120000,
+    "content": "The CFO liquidated 120,000 shares."
+  },
+  {
+    "ticker": "NVDA",
+    "date": "2026-03-18",
+    "executive_role": "EVP of Operations",
+    "action": "SELL",
+    "shares_volume": 90000,
+    "content": "The EVP of Operations reported the disposition of 90,000 shares."
+  },
+  {
+    "ticker": "NVDA",
+    "date": "2026-03-24",
+    "executive_role": "Director",
+    "action": "SELL",
+    "shares_volume": 50000,
+    "content": "A Director sold 50,000 shares."
+  },
+  {
+    "ticker": "TSLA",
+    "date": "2026-03-04",
+    "executive_role": "CFO",
+    "action": "SELL",
+    "shares_volume": 150000,
+    "content": "The CFO executed a sale of 150,000 shares."
+  },
+  {
+    "ticker": "TSLA",
+    "date": "2026-03-09",
+    "executive_role": "SVP of Powertrain",
+    "action": "SELL",
+    "shares_volume": 80000,
+    "content": "The SVP of Powertrain disposed of 80,000 shares."
+  },
+  {
+    "ticker": "TSLA",
+    "date": "2026-03-14",
+    "executive_role": "Director",
+    "action": "SELL",
+    "shares_volume": 40000,
+    "content": "A member of the Board of Directors liquidated 40,000 shares."
+  },
+  {
+    "ticker": "TSLA",
+    "date": "2026-03-20",
+    "executive_role": "Chief Accounting Officer",
+    "action": "SELL",
+    "shares_volume": 25000,
+    "content": "The CAO reported an open market sale of 25,000 shares."
+  },
+  {
+    "ticker": "TSLA",
+    "date": "2026-03-26",
+    "executive_role": "Director",
+    "action": "BUY",
+    "shares_volume": 10000,
+    "content": "A Director acquired 10,000 shares."
+  },
+  {
+    "ticker": "AAPL",
+    "date": "2026-03-03",
+    "executive_role": "CEO",
+    "action": "SELL",
+    "shares_volume": 350000,
+    "content": "The CEO executed a scheduled 10b5-1 sale of 350,000 shares."
+  },
+  {
+    "ticker": "AAPL",
+    "date": "2026-03-07",
+    "executive_role": "COO",
+    "action": "SELL",
+    "shares_volume": 120000,
+    "content": "The Chief Operating Officer disposed of 120,000 shares."
+  },
+  {
+    "ticker": "AAPL",
+    "date": "2026-03-11",
+    "executive_role": "CFO",
+    "action": "SELL",
+    "shares_volume": 85000,
+    "content": "The CFO reported the sale of 85,000 shares."
+  },
+  {
+    "ticker": "AAPL",
+    "date": "2026-03-18",
+    "executive_role": "Director",
+    "action": "BUY",
+    "shares_volume": 50000,
+    "content": "A Director purchased 50,000 shares in the open market."
+  },
+  {
+    "ticker": "AAPL",
+    "date": "2026-03-22",
+    "executive_role": "SVP of Retail",
+    "action": "SELL",
+    "shares_volume": 45000,
+    "content": "The SVP of Retail sold 45,000 shares."
+  },
+  {
+    "ticker": "BA",
+    "date": "2026-03-05",
+    "executive_role": "CEO",
+    "action": "BUY",
+    "shares_volume": 100000,
+    "content": "The CEO executed an open market purchase of 100,000 shares."
+  },
+  {
+    "ticker": "BA",
+    "date": "2026-03-10",
+    "executive_role": "CFO",
+    "action": "SELL",
+    "shares_volume": 40000,
+    "content": "The CFO reported the disposition of 40,000 shares."
+  },
+  {
+    "ticker": "BA",
+    "date": "2026-03-15",
+    "executive_role": "Director",
+    "action": "BUY",
+    "shares_volume": 25000,
+    "content": "A Director acquired 25,000 shares."
+  },
+  {
+    "ticker": "BA",
+    "date": "2026-03-21",
+    "executive_role": "EVP of Commercial Airplanes",
+    "action": "SELL",
+    "shares_volume": 60000,
+    "content": "The EVP of Commercial Airplanes sold 60,000 shares."
+  },
+  {
+    "ticker": "BA",
+    "date": "2026-03-26",
+    "executive_role": "Chief Engineer",
+    "action": "SELL",
+    "shares_volume": 15000,
+    "content": "The Chief Engineer executed a sale of 15,000 shares."
+  },
+  {
+    "ticker": "XOM",
+    "date": "2026-03-03",
+    "executive_role": "CEO",
+    "action": "SELL",
+    "shares_volume": 200000,
+    "content": "The CEO reported an open market sale of 200,000 shares."
+  },
+  {
+    "ticker": "XOM",
+    "date": "2026-03-08",
+    "executive_role": "CFO",
+    "action": "BUY",
+    "shares_volume": 50000,
+    "content": "The CFO purchased 50,000 shares."
+  },
+  {
+    "ticker": "XOM",
+    "date": "2026-03-12",
+    "executive_role": "SVP of Upstream",
+    "action": "SELL",
+    "shares_volume": 120000,
+    "content": "The SVP of Upstream disposed of 120,000 shares."
+  },
+  {
+    "ticker": "XOM",
+    "date": "2026-03-18",
+    "executive_role": "Director",
+    "action": "BUY",
+    "shares_volume": 30000,
+    "content": "A Director acquired 30,000 shares."
+  },
+  {
+    "ticker": "XOM",
+    "date": "2026-03-25",
+    "executive_role": "Director",
+    "action": "BUY",
+    "shares_volume": 15000,
+    "content": "A Director filed a Form 4 reporting the purchase of 15,000 shares."
+  },
+  {
+    "ticker": "PFE",
+    "date": "2026-03-04",
+    "executive_role": "CEO",
+    "action": "BUY",
+    "shares_volume": 300000,
+    "content": "The CEO executed an open market purchase of 300,000 shares."
+  },
+  {
+    "ticker": "PFE",
+    "date": "2026-03-10",
+    "executive_role": "CFO",
+    "action": "BUY",
+    "shares_volume": 150000,
+    "content": "The CFO acquired 150,000 shares."
+  },
+  {
+    "ticker": "PFE",
+    "date": "2026-03-15",
+    "executive_role": "Chief Medical Officer",
+    "action": "BUY",
+    "shares_volume": 80000,
+    "content": "The Chief Medical Officer purchased 80,000 shares."
+  },
+  {
+    "ticker": "PFE",
+    "date": "2026-03-21",
+    "executive_role": "Director",
+    "action": "BUY",
+    "shares_volume": 50000,
+    "content": "A Director added 50,000 shares to their direct holdings."
+  },
+  {
+    "ticker": "PFE",
+    "date": "2026-03-29",
+    "executive_role": "EVP of Oncology",
+    "action": "BUY",
+    "shares_volume": 40000,
+    "content": "The EVP of Oncology reported an open market purchase of 40,000 shares."
+  }
+]
