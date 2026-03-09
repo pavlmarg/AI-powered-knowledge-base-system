@@ -1,0 +1,86 @@
+GitHub GuideBook
+
+Phase 1: Branch set up
+
+One-Time Setup (Create your Lab)
+We need to create your alex branch and switch to it.
+
+Open your VS Code Terminal.
+
+Type this to create the branch and switch to it immediately:
+
+git checkout -b alex
+(Note: checkout means "switch to", and -b means "create new branch".)
+
+Verify you are on the right branch:
+
+git branch
+
+You should see * alex (with the star) and main.
+
+Phase 2: The "Safe" Cycle "Μπαίνεις στο branch δουλέψεις "
+Every time you sit down to work, follow this exact sequence.
+
+	Step 1: Ensure you are on alex
+	Always check before you start coding.
+
+	git branch
+	If the star * is not on alex, type: git checkout alex
+
+
+	Step 2: Code and Test
+	Make your changes in VS Code files.
+
+	Step 3: The "Save Game" (Add & Commit)
+	When you are happy with a change (e.g., "I fixed the button color"):
+
+	Check what you changed:
+
+	git status
+	(You will see red files—these are modified but not saved to Git yet.)
+
+	Stage ALL changes (Prepare them):
+
+	git add .
+	(The . means "everything in this folder".)
+
+	Commit (Save them):
+
+	git commit -m "Changed the button color to blue"
+	(Always write a message in the quotes so you remember what you did.)
+
+	Step 4: Upload to Cloud (Push)
+	Now we send your saved alex branch to GitHub.
+
+	git push -u origin alex
+
+	Step 5: The Merge (Going Live)
+	Still at this point, your code is on GitHub's alex branch. You have to go through 	the github link and go create the pull request and merge it only if there is no 	conflicts
+
+
+Phase 3: Take the changes "Sync with main"
+
+	1. Switch to Main:
+
+	git checkout main
+
+	2. Update Main (Safety Step):
+	(Just in case you made changes on another computer)
+
+	git pull origin main
+
+	2. Switch to Alex:
+
+	git pull origin main
+
+	3. Merge Main into Alex:
+	This takes the code from main and puts it into alex.
+
+	git merge main
+
+
+Emergency Commands (The "Undo" Button)
+"I haven't committed yet, but I hate my changes. Reset the file!"
+
+git checkout -- src/folder_name.file_type_your_were_working
+
