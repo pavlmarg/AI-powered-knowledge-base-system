@@ -6,7 +6,7 @@ uvicorn[standard]==0.32.1
 openai==1.57.0
 
 # ── ChromaDB — vector database client ────────────────────────────────────────
-chromadb==0.6.3
+chromadb==1.0.0
 
 # ── LlamaIndex — async workflow orchestration (Pillar 2) ─────────────────────
 llama-index-core==0.12.6

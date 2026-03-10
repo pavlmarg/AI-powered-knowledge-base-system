@@ -47,26 +47,57 @@ def _parse_date(date_str: str) -> int:
     return int(dt.timestamp())
 
 
+
+# Plain English company name → ticker mapping for posts that don't use cashtags
+COMPANY_NAME_MAP: dict[str, str] = {
+    "apple"     : "AAPL",
+    "iphone"    : "AAPL",
+    "tim cook"  : "AAPL",
+    "tesla"     : "TSLA",
+    "elon"      : "TSLA",
+    "nvidia"    : "NVDA",
+    "jensen"    : "NVDA",
+    "palantir"  : "PLTR",
+    "karp"      : "PLTR",
+    "gamestop"  : "GME",
+    "roaring kitty" : "GME",
+    "jpmorgan"  : "JPM",
+    "jp morgan" : "JPM",
+    "jamie dimon": "JPM",
+    "boeing"    : "BA",
+    "pfizer"    : "PFE",
+    "nextera"   : "NEE",
+    "exxon"     : "XOM",
+}
+
+
 def _extract_ticker(content: str) -> str:
     """
     Extract ticker from post content.
 
     Strategy (in order of priority):
-      1. Cashtag match:  $TSLA  — the standard financial social media format
-      2. Hashtag match:  #TSLA  — used as fallback in some posts
-      3. Returns 'UNKNOWN' if no known ticker found
+      1. Cashtag match:   $TSLA  — standard financial social media format
+      2. Hashtag match:   #TSLA  — used as fallback in some posts
+      3. Company name match — plain English mentions e.g. "Apple", "GameStop"
+      4. Returns 'UNKNOWN' if no known ticker found
     """
-    # Search for $TICKER pattern first
+    # 1. Search for $TICKER pattern
     cashtags = re.findall(r"\$([A-Z]{1,5})", content)
     for tag in cashtags:
         if tag in KNOWN_TICKERS:
             return tag
 
-    # Fallback: search for #TICKER pattern
+    # 2. Fallback: search for #TICKER pattern
     hashtags = re.findall(r"#([A-Z]{1,5})", content)
     for tag in hashtags:
         if tag in KNOWN_TICKERS:
             return tag
+
+    # 3. Fallback: plain English company/person name
+    content_lower = content.lower()
+    for name, ticker in COMPANY_NAME_MAP.items():
+        if name in content_lower:
+            return ticker
 
     return "UNKNOWN"
 
@@ -145,7 +176,9 @@ def ingest_social() -> int:
             "date_ts"          : date_ts,
             "date_str"         : record["date"],
         })
-        ids.append(str(uuid.uuid5(uuid.NAMESPACE_DNS, embed_text)))
+        # uuid4 = fully random — avoids collision when two posts have
+        # identical content after UNKNOWN ticker substitution
+        ids.append(str(uuid.uuid4()))
 
     print(f"[Social] Generating embeddings for {len(texts)} records...")
     embeddings = embed_texts(texts)

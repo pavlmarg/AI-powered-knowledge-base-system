@@ -8,8 +8,10 @@ Returns one ChromaDB Collection object per data layer.
 Collections are created with cosine similarity — optimal for text embeddings.
 """
 
+from __future__ import annotations
+
 import chromadb
-from chromadb.config import Settings
+from typing import Optional, Any
 
 from core.config import (
     CHROMA_HOST,
@@ -20,19 +22,15 @@ from core.config import (
 )
 
 # ── Client (singleton pattern) ────────────────────────────────────────────────
-# HttpClient connects to the ChromaDB Docker container.
-# In local dev without Docker, swap to:  chromadb.PersistentClient(path="./vectordb")
-_client: chromadb.HttpClient | None = None
+_client: Optional[Any] = None
 
 
 def get_client() -> chromadb.HttpClient:
-    """Return the shared ChromaDB HTTP client, creating it once."""
     global _client
     if _client is None:
         _client = chromadb.HttpClient(
             host=CHROMA_HOST,
             port=CHROMA_PORT,
-            settings=Settings(anonymized_telemetry=False),
         )
     return _client
 
