@@ -1,0 +1,20 @@
+# Environment
+.env
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+
+# Vector DB persistent data
+vectordb/*
+!vectordb/.gitkeep
+
+# Node
+node_modules/
+dist/
+
+# OS
+.DS_Store
