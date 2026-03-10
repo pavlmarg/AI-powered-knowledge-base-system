@@ -108,11 +108,11 @@ async def run_parallel_retrieval(ticker: str, query: str) -> dict:
     }
 
 
-def retrieve_all(ticker: str, query: str) -> dict:
+async def retrieve_all(ticker: str, query: str) -> dict:
     """
-    Synchronous entry point for the parallel workflow.
-    Called by the FastAPI endpoint (Phase 4) which handles
-    its own async event loop.
+    Async entry point for the parallel workflow.
+    Called by the FastAPI endpoint with await — no new event loop needed
+    since FastAPI/uvicorn already manages one.
 
     Args:
         ticker : Stock ticker e.g. "GME"
@@ -121,7 +121,7 @@ def retrieve_all(ticker: str, query: str) -> dict:
     Returns:
         Unified context dict with results from all 4 layers
     """
-    return asyncio.run(run_parallel_retrieval(ticker, query))
+    return await run_parallel_retrieval(ticker, query)
 
 
 if __name__ == "__main__":
@@ -137,7 +137,7 @@ if __name__ == "__main__":
     print(f"  Query  : {TEST_QUERY}")
     print(f"{'='*55}")
 
-    context = retrieve_all(TEST_TICKER, TEST_QUERY)
+    context = asyncio.run(retrieve_all(TEST_TICKER, TEST_QUERY))
 
     print(f"\n── Full Context Summary ────────────────────────────")
     print(f"  Ticker  : {context['ticker']}")
