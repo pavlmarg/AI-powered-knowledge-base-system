@@ -1,0 +1,21 @@
+# ── Core API framework ────────────────────────────────────────────────────────
+fastapi==0.115.6
+uvicorn[standard]==0.32.1
+
+# ── OpenAI — embeddings + synthesis ──────────────────────────────────────────
+openai==1.57.0
+
+# ── ChromaDB — vector database client ────────────────────────────────────────
+chromadb==0.6.3
+
+# ── LlamaIndex — async workflow orchestration (Pillar 2) ─────────────────────
+llama-index-core==0.12.6
+
+# ── Pydantic — structured output schemas (Pillar 3) ──────────────────────────
+pydantic==2.10.4
+
+# ── Live price data (Layer 4) ─────────────────────────────────────────────────
+yfinance==0.2.51
+
+# ── Environment variables ─────────────────────────────────────────────────────
+python-dotenv==1.0.1
