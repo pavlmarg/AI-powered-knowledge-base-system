@@ -16,7 +16,7 @@ load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), "..", "..", ".en
 # ── OpenAI ────────────────────────────────────────────────────────────────────
 OPENAI_API_KEY: str = os.getenv("OPENAI_API_KEY", "")
 EMBEDDING_MODEL: str = "text-embedding-3-small"   # 1536-dim, cost-efficient
-SYNTHESIS_MODEL: str = "gpt-4o"                    # Used for CoT + structured output
+SYNTHESIS_MODEL: str = "gpt-4.1"                    # Used for CoT + structured output
 
 # ── ChromaDB ──────────────────────────────────────────────────────────────────
 CHROMA_HOST: str = os.getenv("CHROMA_HOST", "chromadb")   # Docker service name
