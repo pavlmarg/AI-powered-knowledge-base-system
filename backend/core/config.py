@@ -9,11 +9,12 @@ Every other module imports from this file — never from os.environ directly.
 import os
 from dotenv import load_dotenv
 
-os.environ["ANONYMIZED_TELEMETRY"] = "false"
-
 # Load .env file from the project root (one level above /backend)
 load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), "..", "..", ".env"))
 
+
+# ── Finnhub ───────────────────────────────────────────────────────────────────
+FINNHUB_API_KEY: str = os.getenv("FINNHUB_API_KEY", "")
 
 # ── OpenAI ────────────────────────────────────────────────────────────────────
 OPENAI_API_KEY: str = os.getenv("OPENAI_API_KEY", "")
@@ -36,7 +37,7 @@ SOCIAL_FILE: str  = os.path.join(DATA_DIR, "layer-2-social.json")
 INSIDER_FILE: str = os.path.join(DATA_DIR, "layer-3-insider.json")
 
 # ── Known tickers (the 10 companies in scope) ─────────────────────────────────
-KNOWN_TICKERS: set[str] = {
+KNOWN_TICKERS: set = {
     "AAPL", "BA", "GME", "JPM", "NEE",
     "NVDA", "PFE", "PLTR", "TSLA", "XOM"
 }
