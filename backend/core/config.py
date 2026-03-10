@@ -9,6 +9,8 @@ Every other module imports from this file — never from os.environ directly.
 import os
 from dotenv import load_dotenv
 
+os.environ["ANONYMIZED_TELEMETRY"] = "false"
+
 # Load .env file from the project root (one level above /backend)
 load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), "..", "..", ".env"))
 
