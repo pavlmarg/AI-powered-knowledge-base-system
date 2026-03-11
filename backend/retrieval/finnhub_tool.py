@@ -3,33 +3,23 @@ retrieval/finnhub_tool.py
 -------------------------
 Layer 4 — Live market data fetcher using the official Finnhub REST API.
 
-Finnhub replaces yfinance as our live data source because:
-  - It is an official REST API (not a scraper) — reliable and stable
-  - Free tier allows 60 calls/minute — more than enough for our use case
-  - Returns real-time quote data with clean JSON responses
-  - No rate-limiting issues like Yahoo Finance in 2025
+UPGRADED: Removed the KNOWN_TICKERS whitelist guard. The system now
+accepts any valid stock ticker, so the price fetcher must too.
+For unknown tickers there is no mock fallback — we return a clear
+error dict instead of silently returning stale mock data.
 
 Architecture:
-  Tier 1 — Attempts a real Finnhub API call
-  Tier 2 — Falls back to realistic mock data if the call fails for any reason
-             (network issue, market closed, key misconfiguration, etc.)
+  Tier 1 — Attempts a real Finnhub API call for any ticker
+  Tier 2 — Falls back to mock data ONLY for the original seed tickers
+            (kept so demos work offline for the 10 known companies)
+  Tier 3 — Returns an error dict for unknown tickers if Finnhub fails
 
 The 'is_live' key in every response tells the caller and the frontend
-whether the data is real-time or from the mock fallback — full transparency.
-
-Finnhub quote endpoint returns:
-  c  — current price
-  d  — change
-  dp — percent change
-  h  — high of the day
-  l  — low of the day
-  o  — open price of the day
-  pc — previous close price
-  t  — timestamp
+whether the data is real-time or from the mock fallback.
 """
 
 import finnhub
-from core.config import FINNHUB_API_KEY, KNOWN_TICKERS
+from core.config import FINNHUB_API_KEY, SEED_TICKERS
 
 # ── Finnhub client (singleton) ────────────────────────────────────────────────
 _client: finnhub.Client | None = None
@@ -43,9 +33,9 @@ def _get_client() -> finnhub.Client:
     return _client
 
 
-# ── Realistic fallback mock data for our 10 tickers ───────────────────────────
-# Used ONLY when the live Finnhub call fails
-# Values reflect approximate market prices as of March 2026
+# ── Realistic fallback mock data for seed tickers only ───────────────────────
+# Used ONLY when the live Finnhub call fails for a known seed ticker.
+# Values reflect approximate market prices as of March 2026.
 MOCK_PRICES: dict[str, dict] = {
     "AAPL": {
         "current_price" : 227.50,
@@ -152,7 +142,7 @@ MOCK_PRICES: dict[str, dict] = {
 
 def _fetch_live(ticker: str) -> dict | None:
     """
-    Attempt a live Finnhub quote call.
+    Attempt a live Finnhub quote call for any ticker.
     Returns structured dict on success, None on any failure.
     """
     try:
@@ -167,12 +157,12 @@ def _fetch_live(ticker: str) -> dict | None:
         return {
             "current_price" : round(current_price, 2),
             "previous_close": round(quote.get("pc", 0), 2),
-            "change"        : round(quote.get("d", 0), 2),
+            "change"        : round(quote.get("d",  0), 2),
             "change_pct"    : round(quote.get("dp", 0), 2),
-            "day_high"      : round(quote.get("h", 0), 2),
-            "day_low"       : round(quote.get("l", 0), 2),
-            "open"          : round(quote.get("o", 0), 2),
-            "market_cap"    : "N/A",   # Finnhub free tier: quote endpoint only
+            "day_high"      : round(quote.get("h",  0), 2),
+            "day_low"       : round(quote.get("l",  0), 2),
+            "open"          : round(quote.get("o",  0), 2),
+            "market_cap"    : "N/A",
         }
     except Exception as e:
         print(f"[Finnhub] ⚠️  API call failed for {ticker}: {e}")
@@ -181,38 +171,42 @@ def _fetch_live(ticker: str) -> dict | None:
 
 def get_live_price(ticker: str) -> dict:
     """
-    Fetch real-time market data for a given ticker.
+    Fetch real-time market data for any stock ticker.
 
-    Tries Finnhub first (Tier 1). Falls back to mock data (Tier 2)
-    if the API call fails for any reason.
+    Tier 1 — tries live Finnhub API (works for any valid ticker).
+    Tier 2 — falls back to mock data for seed tickers (offline demo safety).
+    Tier 3 — returns an error dict for unknown tickers with no mock data.
 
     Args:
-        ticker: Stock ticker symbol e.g. "GME", "TSLA"
+        ticker: Any stock ticker symbol e.g. "GME", "MSFT", "AMZN"
 
     Returns:
-        dict with market data + is_live flag indicating data source
+        dict with market data + is_live flag indicating data source.
     """
-    if ticker not in KNOWN_TICKERS:
-        return {
-            "ticker" : ticker,
-            "error"  : f"Ticker '{ticker}' is not in the supported list.",
-            "is_live": False,
-        }
-
-    # Tier 1 — try live Finnhub data
+    # Tier 1 — try live data for any ticker
     live_data = _fetch_live(ticker)
     if live_data:
         return {"ticker": ticker, "is_live": True, **live_data}
 
-    # Tier 2 — fall back to mock data
-    print(f"[Finnhub] ⚠️  Using mock fallback for {ticker}.")
-    mock = MOCK_PRICES.get(ticker, {})
-    return {"ticker": ticker, "is_live": False, **mock}
+    # Tier 2 — mock fallback for seed tickers only
+    if ticker in SEED_TICKERS and ticker in MOCK_PRICES:
+        print(f"[Finnhub] ⚠️  Using mock fallback for {ticker}.")
+        mock = MOCK_PRICES[ticker]
+        return {"ticker": ticker, "is_live": False, **mock}
+
+    # Tier 3 — unknown ticker, live call failed, no mock available
+    print(f"[Finnhub] ⚠️  No price data available for {ticker}.")
+    return {
+        "ticker" : ticker,
+        "error"  : f"Could not fetch live price for '{ticker}'. Market may be closed.",
+        "is_live": False,
+    }
 
 
 if __name__ == "__main__":
     # Quick test — run with: python -m retrieval.finnhub_tool
-    test_tickers = ["GME", "TSLA", "NVDA"]
+    # Tests both a seed ticker and a non-seed ticker
+    test_tickers = ["GME", "TSLA", "MSFT", "AMZN"]
     for t in test_tickers:
         result = get_live_price(t)
         status = "LIVE 🟢" if result.get("is_live") else "MOCK 🟡"

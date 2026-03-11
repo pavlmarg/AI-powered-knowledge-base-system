@@ -3,69 +3,65 @@ api/query.py
 ------------
 POST /api/query — the main endpoint of the Financial RAG system.
 
-This version adds two major upgrades over the original:
+Upgrades in this version:
 
-  1. LLM-based ticker resolution
-     ────────────────────────────
-     The original regex-based extractor failed on freeform questions like
-     "What do insiders think about the EV company with the most Reddit hype?"
-     
-     Now there are THREE resolution stages (regex → LLM → cross-portfolio):
-       Stage 1: Fast regex (cashtag, uppercase word, company name)  ~0ms
-       Stage 2: LLM call to gpt-4.1-mini for fuzzy NL resolution   ~400ms
-       Stage 3: No ticker found → route to cross-portfolio analysis
+  1. Dynamic ticker support
+     ────────────────────────
+     The old KNOWN_TICKERS whitelist is gone. Any valid stock ticker
+     is now accepted. The system auto-ingests news on first query.
 
-  2. Query routing
+  2. LLM-based ticker resolution (3-stage pipeline)
+     ─────────────────────────────────────────────────
+     Stage 1: Fast regex  (cashtag / uppercase / company name)  ~0ms
+     Stage 2: LLM call to gpt-4.1 for freeform NL resolution   ~400ms
+     Stage 3: No ticker → route to cross-portfolio analysis
+
+  3. Query routing
      ──────────────
-     Questions are classified before retrieval:
-       • SINGLE_STOCK    → existing deep-dive pipeline (unchanged)
-       • CROSS_PORTFOLIO → fan-out across all 10 tickers, comparative synthesis
-       • GENERAL         → cross-portfolio with broader synthesis framing
+     SINGLE_STOCK    → single-stock deep dive (any ticker)
+     CROSS_PORTFOLIO → fan-out across SEED_TICKERS
+     GENERAL         → fan-out across SEED_TICKERS with broader framing
 
-     The router uses a lightweight LLM call (~200ms) to classify,
-     so the overhead is minimal and the routing is reliable.
+  4. Startup seeding
+     ─────────────────
+     FastAPI lifespan hook calls seed_on_startup() so SEED_TICKERS
+     always have fresh data before the first request arrives.
 
 Request body:
   {
-    "question" : "Which stock has the most aggressive insider selling?",
-    "ticker"   : null    ← always optional now; LLM resolves if omitted
-  }
-
-Response body (single-stock — unchanged):
-  {
-    "query_type"      : "single_stock",
-    "ticker"          : "GME",
-    "narrative"       : { ...9 analysis fields... },
-    "knowledge_graph" : { "nodes": [...], "edges": [...] },
-    "price"           : { ...live price data... },
-    "retrieved_docs"  : { "news": [...], "social": [...], "insider": [...] }
-  }
-
-Response body (cross-portfolio / general):
-  {
-    "query_type"      : "cross_portfolio",
-    "ticker"          : null,
-    "narrative"       : { "answer": ..., "ticker_insights": [...], ... },
-    "knowledge_graph" : { "nodes": [...], "edges": [...] },
-    "price"           : null,
-    "retrieved_docs"  : null
+    "question" : "What is Microsoft doing in AI?",
+    "ticker"   : null    ← fully optional, auto-resolved
   }
 """
 
 import re
-import json
-from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel, Field
+from contextlib import asynccontextmanager
 from typing import Optional
 
+from fastapi import APIRouter, FastAPI, HTTPException
+from pydantic import BaseModel, Field
 from openai import OpenAI
-from core.config import KNOWN_TICKERS, OPENAI_API_KEY, SYNTHESIS_MODEL
-from retrieval.workflow import retrieve_all, run_cross_portfolio_retrieval
+
+from core.config import SEED_TICKERS, OPENAI_API_KEY, SYNTHESIS_MODEL
+from retrieval.workflow import retrieve_all, run_cross_portfolio_retrieval, seed_on_startup
 from synthesis.synthesizer import synthesize, synthesize_general
 from synthesis.schemas import QueryType
 
 router = APIRouter()
 _client = OpenAI(api_key=OPENAI_API_KEY)
+
+
+# ── Startup event ─────────────────────────────────────────────────────────────
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """
+    FastAPI lifespan hook — runs seed_on_startup() before first request.
+    Register this in main.py:  app = FastAPI(lifespan=lifespan)
+    """
+    await seed_on_startup()
+    yield
+    # (shutdown logic here if needed)
 
 
 # ── Request / Response Models ─────────────────────────────────────────────────
@@ -75,13 +71,13 @@ class QueryRequest(BaseModel):
         ...,
         min_length=3,
         max_length=500,
-        description="Natural language question. Can reference a specific stock or be a general portfolio question.",
-        example="Which stocks have the most bearish insider activity right now?"
+        description="Natural language question about any stock or the overall market.",
+        example="What is Microsoft doing in the AI space right now?"
     )
     ticker: Optional[str] = Field(
         default=None,
-        description="Stock ticker e.g. 'GME'. Fully optional — auto-resolved from question if omitted.",
-        example="GME"
+        description="Optional ticker e.g. 'MSFT'. Auto-resolved from question if omitted.",
+        example="MSFT"
     )
 
 
@@ -98,23 +94,28 @@ class QueryResponse(BaseModel):
 
 def _extract_ticker_regex(question: str) -> Optional[str]:
     """
-    Fast regex-based ticker extraction — runs first, no API cost.
+    Fast regex-based ticker extraction — zero API cost.
 
     Looks for:
       1. Explicit cashtag:  $GME
-      2. Uppercase word:    GME
+      2. Uppercase word:    GME  (2-5 chars)
       3. Company name:      GameStop, Tesla, Apple...
     """
-    # 1. Cashtag pattern
+    # 1. Cashtag
     cashtags = re.findall(r"\$([A-Z]{1,5})", question)
-    for tag in cashtags:
-        if tag in KNOWN_TICKERS:
-            return tag
+    if cashtags:
+        return cashtags[0]
 
     # 2. Uppercase ticker word
     words = re.findall(r"\b([A-Z]{2,5})\b", question)
+    # Filter out common English words that look like tickers
+    english_stopwords = {"I", "A", "AN", "THE", "IS", "ARE", "WAS", "BE",
+                         "IN", "ON", "AT", "TO", "DO", "GO", "OR", "AND",
+                         "FOR", "NOT", "BUT", "ALL", "MY", "WE", "IT",
+                         "US", "CEO", "CFO", "COO", "IPO", "ETF", "AI",
+                         "EV", "GDP", "CPI", "FED", "SEC", "NYSE", "NASDAQ"}
     for word in words:
-        if word in KNOWN_TICKERS:
+        if word not in english_stopwords:
             return word
 
     # 3. Company name mapping
@@ -135,6 +136,17 @@ def _extract_ticker_regex(question: str) -> Optional[str]:
         "exxon"          : "XOM",
         "exxonmobil"     : "XOM",
         "exxon mobil"    : "XOM",
+        "microsoft"      : "MSFT",
+        "amazon"         : "AMZN",
+        "google"         : "GOOGL",
+        "alphabet"       : "GOOGL",
+        "meta"           : "META",
+        "netflix"        : "NFLX",
+        "intel"          : "INTC",
+        "amd"            : "AMD",
+        "salesforce"     : "CRM",
+        "uber"           : "UBER",
+        "airbnb"         : "ABNB",
     }
     question_lower = question.lower()
     for name, ticker in name_map.items():
@@ -144,34 +156,28 @@ def _extract_ticker_regex(question: str) -> Optional[str]:
     return None
 
 
-# ── Stage 2: LLM-Based Ticker Resolution ─────────────────────────────────────
+# ── Stage 2: LLM Ticker Resolution ───────────────────────────────────────────
 
 def _extract_ticker_llm(question: str) -> Optional[str]:
     """
-    Fallback LLM-based ticker resolver for freeform natural language questions.
+    LLM fallback for freeform questions where regex found nothing.
 
-    Uses gpt-4.1 to extract a single ticker from questions
-    like "What's happening with the EV company Jensen Huang keeps mentioning?"
-    
-    Returns the ticker string if found, or None if the question is clearly
-    a general/comparative question with no single stock intended.
+    Uses gpt-4.1 to identify if the question is about one specific
+    publicly traded company and returns its ticker.
+
+    Returns None if the question is genuinely comparative or general.
     """
-    tickers_list = ", ".join(sorted(KNOWN_TICKERS))
+    prompt = f"""You are a financial ticker resolver.
 
-    prompt = f"""You are a financial ticker resolver. 
-    
-The user has asked: "{question}"
+The user asked: "{question}"
 
-The supported tickers are: {tickers_list}
-
-Task: Determine if this question is about ONE specific company from the list above.
-- If yes, return ONLY the ticker symbol. Example: GME
-- If the question compares multiple stocks, asks for a ranking, or is a general question about the whole portfolio, return: NONE
+Task: Is this question about ONE specific publicly traded company?
+- If yes: return ONLY its stock ticker symbol. Example: MSFT
+- If no (comparative, ranking, or general question): return NONE
 
 Rules:
-- Return only the ticker (2-5 uppercase letters) or the word NONE
-- No explanation, no punctuation, no other text
-- Only return a ticker from the supported list above"""
+- Return only a valid stock ticker (1-5 uppercase letters) or the word NONE
+- No explanation, punctuation, or other text"""
 
     try:
         response = _client.chat.completions.create(
@@ -181,9 +187,12 @@ Rules:
             max_tokens=10,
         )
         result = response.choices[0].message.content.strip().upper()
-        print(f"[Router] LLM ticker resolution: '{question[:60]}...' → {result}")
+        print(f"[Router] LLM ticker resolution → {result}")
 
-        if result == "NONE" or result not in KNOWN_TICKERS:
+        if result == "NONE" or not result or len(result) > 5:
+            return None
+        # Basic sanity check: tickers are 1-5 uppercase letters only
+        if not result.isalpha():
             return None
         return result
 
@@ -192,38 +201,33 @@ Rules:
         return None
 
 
-# ── Query Router ──────────────────────────────────────────────────────────────
+# ── Query Classifier ──────────────────────────────────────────────────────────
 
 def _classify_query(question: str, ticker: Optional[str]) -> QueryType:
     """
-    Classify the query type using a lightweight LLM call.
+    Determine the routing path for this query.
 
-    If a ticker has already been resolved, it's always SINGLE_STOCK.
-    Otherwise, classify as CROSS_PORTFOLIO or GENERAL.
-
-    CROSS_PORTFOLIO: requires looking across multiple stocks in our DB
-      e.g. "Which stock has the most bearish insiders?"
-           "Are there any meme stocks with heavy insider selling?"
-    
-    GENERAL: can be answered with broad financial knowledge + portfolio data
-      e.g. "What is insider trading and why does it matter?"
-           "Explain what a bearish signal means"
+    If a ticker was resolved → always SINGLE_STOCK.
+    Otherwise use LLM to classify as CROSS_PORTFOLIO or GENERAL.
     """
     if ticker:
         return QueryType.SINGLE_STOCK
 
-    prompt = f"""Classify this financial question into one of two categories:
+    prompt = f"""Classify this financial question:
 
 Question: "{question}"
 
-Categories:
-  CROSS_PORTFOLIO — requires comparing or ranking specific stocks in a portfolio
-    Examples: "Which stock has the most insider selling?", "Which companies are most bullish on Reddit?", "Are there any stocks where insiders disagree with retail?"
-  
-  GENERAL — a broad financial question or one that needs general knowledge
-    Examples: "What is insider trading?", "Explain what a short squeeze is", "What does bearish mean?"
+CROSS_PORTFOLIO — needs to compare or rank specific stocks
+  Examples: "Which stock has the most insider selling?",
+            "Which companies are most bullish on Reddit?",
+            "Are there stocks where insiders disagree with retail sentiment?"
 
-Return ONLY the category name: CROSS_PORTFOLIO or GENERAL"""
+GENERAL — broad financial knowledge question, no specific stock comparison needed
+  Examples: "What is insider trading?",
+            "What should I invest in?",
+            "Explain what a short squeeze is"
+
+Return ONLY: CROSS_PORTFOLIO or GENERAL"""
 
     try:
         response = _client.chat.completions.create(
@@ -235,13 +239,12 @@ Return ONLY the category name: CROSS_PORTFOLIO or GENERAL"""
         result = response.choices[0].message.content.strip().upper()
         print(f"[Router] Query classified as: {result}")
 
-
         if "GENERAL" in result:
             return QueryType.GENERAL
         return QueryType.CROSS_PORTFOLIO
 
     except Exception as e:
-        print(f"[Router] Query classification failed, defaulting to CROSS_PORTFOLIO: {e}")
+        print(f"[Router] Classification failed, defaulting to CROSS_PORTFOLIO: {e}")
         return QueryType.CROSS_PORTFOLIO
 
 
@@ -250,57 +253,40 @@ Return ONLY the category name: CROSS_PORTFOLIO or GENERAL"""
 @router.post(
     "/query",
     response_model=QueryResponse,
-    summary="Analyse stocks using the full RAG pipeline",
+    summary="Analyse any stock or ask a general portfolio question",
     tags=["Query"],
 )
 async def query(request: QueryRequest):
     """
-    Run the full Financial RAG pipeline.
+    Full Financial RAG pipeline — three routing paths:
 
-    Supports three query modes:
-      1. Single-stock:      deep-dive analysis of one company
-      2. Cross-portfolio:   comparative analysis across all 10 tickers
-      3. General:           broad financial question answered with portfolio context
+      SINGLE_STOCK    : Deep dive on any ticker (auto-ingests if new)
+      CROSS_PORTFOLIO : Comparative analysis across SEED_TICKERS
+      GENERAL         : Broad question answered with portfolio context
 
-    The mode is determined automatically — the user never needs to specify it.
-
-    Steps:
-      1. Resolve ticker (regex → LLM → none)
-      2. Classify query type (single / cross-portfolio / general)
-      3. Run appropriate retrieval workflow
-      4. Synthesize with appropriate engine
-      5. Return unified response
+    The ticker and path are resolved automatically from the question.
     """
 
     # ── Step 1: Resolve ticker ────────────────────────────────────────────────
     ticker = request.ticker
     if ticker:
         ticker = ticker.upper().strip()
-        if ticker not in KNOWN_TICKERS:
-            raise HTTPException(
-                status_code=422,
-                detail=(
-                    f"Ticker '{ticker}' is not supported. "
-                    f"Supported tickers: {', '.join(sorted(KNOWN_TICKERS))}"
-                )
-            )
+        # No whitelist check — any ticker is valid now
     else:
-        # Stage 1: fast regex
         ticker = _extract_ticker_regex(request.question)
         print(f"[Router] Regex extraction: {ticker}")
 
-        # Stage 2: LLM fallback if regex found nothing
         if not ticker:
             ticker = _extract_ticker_llm(request.question)
             print(f"[Router] LLM extraction: {ticker}")
 
-    # ── Step 2: Classify query ────────────────────────────────────────────────
+    # ── Step 2: Classify ──────────────────────────────────────────────────────
     query_type = _classify_query(request.question, ticker)
-    print(f"[Router] Query type: {query_type.value} | Ticker: {ticker}")
+    print(f"[Router] Final route → type={query_type.value} ticker={ticker}")
 
-    # ── Step 3 & 4: Route to appropriate pipeline ─────────────────────────────
+    # ── Step 3 + 4: Retrieve + Synthesize ────────────────────────────────────
 
-    # ── Path A: Single-stock deep dive ────────────────────────────────────────
+    # Path A: Single-stock (any ticker, auto-ingests if new)
     if query_type == QueryType.SINGLE_STOCK:
         try:
             context = await retrieve_all(ticker, request.question)
@@ -328,7 +314,7 @@ async def query(request: QueryRequest):
             },
         )
 
-    # ── Path B: Cross-portfolio / General ────────────────────────────────────
+    # Path B: Cross-portfolio or General
     else:
         try:
             contexts = await run_cross_portfolio_retrieval(request.question)

@@ -20,6 +20,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from api.query import router as query_router
 from api.ingest import router as ingest_router
 
+from api.query import lifespan
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -39,16 +40,7 @@ async def lifespan(app: FastAPI):
 
 
 # ── App ───────────────────────────────────────────────────────────────────────
-app = FastAPI(
-    title="Financial RAG Reasoning Engine",
-    description=(
-        "AI-powered knowledge base that retrieves and synthesizes "
-        "financial intelligence from news, social media, insider trading, "
-        "and live market data."
-    ),
-    version="1.0.0",
-    lifespan=lifespan,
-)
+app = FastAPI(title="Financial RAG Engine", lifespan=lifespan)
 
 # ── CORS ──────────────────────────────────────────────────────────────────────
 # Allows the React frontend (Vite default port 5173) to call the API.

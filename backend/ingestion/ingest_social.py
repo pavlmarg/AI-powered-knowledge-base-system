@@ -32,7 +32,7 @@ import uuid
 from datetime import datetime
 
 from core.config import (
-    KNOWN_TICKERS,
+    SEED_TICKERS,
     SOCIAL_FILE,
     TWITTER_WEIGHTS,
     REDDIT_WEIGHTS,
@@ -84,13 +84,13 @@ def _extract_ticker(content: str) -> str:
     # 1. Search for $TICKER pattern
     cashtags = re.findall(r"\$([A-Z]{1,5})", content)
     for tag in cashtags:
-        if tag in KNOWN_TICKERS:
+        if tag in SEED_TICKERS:
             return tag
 
     # 2. Fallback: search for #TICKER pattern
     hashtags = re.findall(r"#([A-Z]{1,5})", content)
     for tag in hashtags:
-        if tag in KNOWN_TICKERS:
+        if tag in SEED_TICKERS:
             return tag
 
     # 3. Fallback: plain English company/person name
