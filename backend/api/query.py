@@ -108,7 +108,6 @@ def _extract_ticker_regex(question: str) -> Optional[str]:
 
     # 2. Uppercase ticker word
     words = re.findall(r"\b([A-Z]{2,5})\b", question)
-    # Filter out common English words that look like tickers
     english_stopwords = {"I", "A", "AN", "THE", "IS", "ARE", "WAS", "BE",
                          "IN", "ON", "AT", "TO", "DO", "GO", "OR", "AND",
                          "FOR", "NOT", "BUT", "ALL", "MY", "WE", "IT",
@@ -161,11 +160,8 @@ def _extract_ticker_regex(question: str) -> Optional[str]:
 def _extract_ticker_llm(question: str) -> Optional[str]:
     """
     LLM fallback for freeform questions where regex found nothing.
-
     Uses gpt-4.1 to identify if the question is about one specific
     publicly traded company and returns its ticker.
-
-    Returns None if the question is genuinely comparative or general.
     """
     prompt = f"""You are a financial ticker resolver.
 
@@ -191,7 +187,6 @@ Rules:
 
         if result == "NONE" or not result or len(result) > 5:
             return None
-        # Basic sanity check: tickers are 1-5 uppercase letters only
         if not result.isalpha():
             return None
         return result
@@ -266,12 +261,10 @@ async def query(request: QueryRequest):
 
     The ticker and path are resolved automatically from the question.
     """
-
     # ── Step 1: Resolve ticker ────────────────────────────────────────────────
     ticker = request.ticker
     if ticker:
         ticker = ticker.upper().strip()
-        # No whitelist check — any ticker is valid now
     else:
         ticker = _extract_ticker_regex(request.question)
         print(f"[Router] Regex extraction: {ticker}")
@@ -299,18 +292,19 @@ async def query(request: QueryRequest):
             raise HTTPException(status_code=500, detail=f"Synthesis failed: {str(e)}")
 
         return QueryResponse(
-            query_type     = query_type.value,
-            ticker         = ticker,
-            narrative      = output.narrative.model_dump(),
-            knowledge_graph= {
+            query_type      = query_type.value,
+            ticker          = ticker,
+            narrative       = output.narrative.model_dump(),
+            knowledge_graph = {
                 "nodes": [n.model_dump() for n in output.knowledge_graph.nodes],
                 "edges": [e.model_dump() for e in output.knowledge_graph.edges],
             },
-            price          = context["price"],
-            retrieved_docs = {
-                "news"   : context["news"],
-                "social" : context["social"],
-                "insider": context["insider"],
+            price           = context["price"],
+            retrieved_docs  = {
+                "news"        : context["news"],
+                "social"      : context["social"],
+                "insider"     : context["insider"],
+                "reddit_buzz" : context.get("reddit_buzz", []),
             },
         )
 
@@ -327,13 +321,13 @@ async def query(request: QueryRequest):
             raise HTTPException(status_code=500, detail=f"General synthesis failed: {str(e)}")
 
         return QueryResponse(
-            query_type     = query_type.value,
-            ticker         = output.narrative.top_ticker,
-            narrative      = output.narrative.model_dump(),
-            knowledge_graph= {
+            query_type      = query_type.value,
+            ticker          = output.narrative.top_ticker,
+            narrative       = output.narrative.model_dump(),
+            knowledge_graph = {
                 "nodes": [n.model_dump() for n in output.knowledge_graph.nodes],
                 "edges": [e.model_dump() for e in output.knowledge_graph.edges],
             },
-            price          = None,
-            retrieved_docs = None,
+            price           = None,
+            retrieved_docs  = None,
         )

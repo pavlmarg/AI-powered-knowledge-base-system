@@ -38,21 +38,37 @@ detecting market signals, insider activity patterns, and contradictions between
 institutional behaviour and retail sentiment.
 
 You will be given a multi-layer intelligence brief about a specific stock containing:
-  - Recent news articles
-  - Social media sentiment from retail investors
-  - Insider trading activity (executives buying or selling)
-  - Live market price data
+  - Layer 1: Recent news articles (fundamental and institutional signals)
+  - Layer 2: Social media posts from retail investors (Twitter/Reddit posts)
+  - Layer 3: Insider trading activity (executives buying or selling shares)
+  - Layer 4: Live market price data
+  - Layer 5: Reddit Buzz data from ApeWisdom — quantitative Reddit activity:
+             rank across r/wallstreetbets and finance subreddits, mention count,
+             upvote count, and momentum direction (RISING/FALLING/STABLE/NEW ENTRY)
 
 Your task is to reason through each layer systematically and produce a structured 
 analysis that identifies the most important signals and contradictions.
 
 REASONING APPROACH — follow this chain of thought strictly:
   Step 1: What do the news articles reveal about the company's fundamentals?
-  Step 2: What is the dominant retail sentiment on social media? Is it rational?
-  Step 3: What are insiders actually doing? Are they buying or selling?
-  Step 4: What does the current price and daily movement signal?
-  Step 5: What is the most critical contradiction between these signals?
-  Step 6: What is your final synthesized assessment?"""
+  Step 2: What is the dominant retail sentiment from social media posts?
+  Step 3: What does the Reddit Buzz signal reveal about community momentum?
+           Use the exact rank, mention count, upvote count, and trend direction.
+           A RISING rank with high mentions = growing retail interest.
+           A FALLING rank = cooling sentiment even if posts seem positive.
+  Step 4: What are insiders actually doing? Are they buying or selling?
+  Step 5: What does the current price and daily movement signal?
+  Step 6: What is the most critical contradiction between these signals?
+           Especially look for: Reddit RISING vs bad news, Reddit FALLING vs
+           bullish posts, insiders selling while Reddit momentum is RISING.
+  Step 7: What is your final synthesized assessment?
+
+KNOWLEDGE GRAPH INSTRUCTIONS:
+  Always create a dedicated Reddit Buzz node when Layer 5 data is present.
+  Use it as a Sentiment node with label like "Reddit: Rank #9 FALLING" and
+  connect it to the company node and to the overall sentiment node.
+  This node should be connected with edges that show whether it reinforces
+  or contradicts the news and insider signals."""
 
 
 # ── General / Cross-Portfolio Prompt ─────────────────────────────────────────
@@ -62,23 +78,28 @@ to a multi-layer knowledge base covering 10 stocks: AAPL, BA, GME, JPM, NEE, NVD
 PFE, PLTR, TSLA, XOM.
 
 You will be given intelligence briefs from multiple stocks and a user question.
+Each brief includes news, social posts, insider trades, live price, and Reddit buzz
+signals (rank, mentions, upvotes, trend direction from ApeWisdom).
+
 Your job is to answer the question by synthesizing signals across the entire portfolio.
 
 This includes:
   - Comparative questions: "Which stock has the most bearish insiders?"
   - Ranking questions: "Which companies have the highest retail enthusiasm?"
-  - Thematic questions: "Are there any stocks where insiders and retail disagree?"
+  - Thematic questions: "Are there any stocks where insiders and Reddit disagree?"
+  - Reddit-specific: "Which stocks are trending on Reddit right now?"
   - General questions about market trends visible across the portfolio
 
 REASONING APPROACH:
   Step 1: Understand exactly what the user is asking.
-  Step 2: For each ticker in the brief, extract the signal most relevant to the question.
+  Step 2: For each ticker, extract the signal most relevant to the question.
+          Include Reddit buzz rank and trend direction as a primary signal.
   Step 3: Rank or compare tickers based on those signals.
-  Step 4: Identify the clearest answer and any interesting patterns.
+  Step 4: Identify the clearest answer and any interesting cross-ticker patterns.
   Step 5: Synthesize a direct, confident conclusion.
 
-Be specific — use actual data from the briefs (share volumes, sentiment scores,
-price movements) rather than generic statements."""
+Be specific — use actual numbers from the briefs (share volumes, Reddit ranks,
+mention counts, price movements) rather than generic statements."""
 
 
 # ── Context Formatters ────────────────────────────────────────────────────────
@@ -86,7 +107,7 @@ price movements) rather than generic statements."""
 def _format_context(context: dict) -> str:
     """
     Format a single-ticker unified context dict into an LLM-readable
-    intelligence brief string.
+    intelligence brief string. Includes all 5 layers.
     """
     ticker = context["ticker"]
     query  = context["query"]
@@ -97,7 +118,7 @@ def _format_context(context: dict) -> str:
     lines.append(f"USER QUERY: {query}")
     lines.append("=" * 60)
 
-    # Price data
+    # ── Layer 4: Price ────────────────────────────────────────────────────────
     lines.append("\n[LAYER 4 — LIVE MARKET DATA]")
     if "error" not in price:
         lines.append(f"  Current Price  : ${price.get('current_price', 'N/A')}")
@@ -111,7 +132,7 @@ def _format_context(context: dict) -> str:
     else:
         lines.append(f"  Price data unavailable: {price.get('error')}")
 
-    # News articles
+    # ── Layer 1: News ─────────────────────────────────────────────────────────
     lines.append(f"\n[LAYER 1 — NEWS ARTICLES ({len(context['news'])} retrieved)]")
     for i, doc in enumerate(context["news"], 1):
         meta = doc.get("metadata", {})
@@ -119,24 +140,45 @@ def _format_context(context: dict) -> str:
         lines.append(f"  Date    : {meta.get('date_str', 'Unknown')}")
         lines.append(f"  Content : {doc.get('document', '')}")
 
-    # Social media posts
+    # ── Layer 2: Social posts ─────────────────────────────────────────────────
     lines.append(f"\n[LAYER 2 — SOCIAL MEDIA POSTS ({len(context['social'])} retrieved)]")
-    for i, doc in enumerate(context["social"], 1):
-        meta = doc.get("metadata", {})
-        lines.append(f"\n  Post {i} [{meta.get('platform', '')}] "
-                     f"by {meta.get('username', '')} "
-                     f"(engagement: {meta.get('engagement_score', 0):.0f})")
-        lines.append(f"  Content : {doc.get('document', '')}")
+    if context["social"]:
+        for i, doc in enumerate(context["social"], 1):
+            meta = doc.get("metadata", {})
+            lines.append(f"\n  Post {i} [{meta.get('platform', '')}] "
+                         f"by {meta.get('username', '')} "
+                         f"(engagement: {meta.get('engagement_score', 0):.0f})")
+            lines.append(f"  Content : {doc.get('document', '')}")
+    else:
+        lines.append("  No social media posts available for this ticker.")
 
-    # Insider trading
+    # ── Layer 3: Insider trading ──────────────────────────────────────────────
     lines.append(f"\n[LAYER 3 — INSIDER TRADING ({len(context['insider'])} retrieved)]")
-    for i, doc in enumerate(context["insider"], 1):
-        meta = doc.get("metadata", {})
-        lines.append(f"\n  Trade {i}: {meta.get('executive_role', '')} "
-                     f"— {meta.get('action', '')} "
-                     f"{meta.get('shares_volume', 0):,} shares")
-        lines.append(f"  Date    : {meta.get('date_str', 'Unknown')}")
-        lines.append(f"  Detail  : {doc.get('document', '')}")
+    if context["insider"]:
+        for i, doc in enumerate(context["insider"], 1):
+            meta = doc.get("metadata", {})
+            lines.append(f"\n  Trade {i}: {meta.get('executive_role', '')} "
+                         f"— {meta.get('action', '')} "
+                         f"{meta.get('shares_volume', 0):,} shares")
+            lines.append(f"  Date    : {meta.get('date_str', 'Unknown')}")
+            lines.append(f"  Detail  : {doc.get('document', '')}")
+    else:
+        lines.append("  No insider trading records available for this ticker.")
+
+    # ── Layer 5: Reddit Buzz ──────────────────────────────────────────────────
+    reddit_buzz = context.get("reddit_buzz", [])
+    lines.append(f"\n[LAYER 5 — REDDIT BUZZ / APEWISDOM ({len(reddit_buzz)} signal(s) retrieved)]")
+    if reddit_buzz:
+        for doc in reddit_buzz:
+            meta = doc.get("metadata", {})
+            lines.append(f"\n  {doc.get('document', '')}")
+            lines.append(f"  Raw Stats — Rank: #{meta.get('rank', 'N/A')} "
+                         f"(was #{meta.get('rank_24h_ago', 'N/A')} yesterday) | "
+                         f"Mentions: {meta.get('mentions', 0):,} | "
+                         f"Upvotes: {meta.get('upvotes', 0):,}")
+    else:
+        lines.append("  No Reddit buzz data available for this ticker "
+                     "(ticker not ranked on ApeWisdom — low Reddit activity).")
 
     return "\n".join(lines)
 
@@ -144,7 +186,8 @@ def _format_context(context: dict) -> str:
 def _format_multi_context(contexts: list[dict], query: str) -> str:
     """
     Format multiple single-ticker contexts into a combined brief for
-    cross-portfolio synthesis. Each ticker gets a compact section.
+    cross-portfolio synthesis. Each ticker gets a compact section
+    including Reddit buzz signal.
     """
     lines = []
     lines.append(f"USER QUESTION: {query}")
@@ -158,14 +201,14 @@ def _format_multi_context(contexts: list[dict], query: str) -> str:
         lines.append(f"\n{'─' * 40}")
         lines.append(f"TICKER: {ticker}")
 
-        # Compact price line
+        # Price
         if "error" not in price:
             lines.append(
                 f"  Price: ${price.get('current_price', 'N/A')} "
                 f"({price.get('change_pct', 'N/A')}% today)"
             )
 
-        # Top news headline only (keep brief)
+        # Top news headline only (keep brief for cross-portfolio)
         if context["news"]:
             top_news = context["news"][0]
             meta = top_news.get("metadata", {})
@@ -182,7 +225,7 @@ def _format_multi_context(contexts: list[dict], query: str) -> str:
                 f"{top_social.get('document', '')[:150]}..."
             )
 
-        # Insider — all trades (this is the key signal layer)
+        # Insider — all trades (key signal layer)
         if context["insider"]:
             lines.append(f"  Insider Trades ({len(context['insider'])}):")
             for doc in context["insider"]:
@@ -193,6 +236,32 @@ def _format_multi_context(contexts: list[dict], query: str) -> str:
                     f"{meta.get('shares_volume', 0):,} shares "
                     f"[{meta.get('date_str', '')}]"
                 )
+
+        # Reddit Buzz — compact one-liner per ticker
+        reddit_buzz = context.get("reddit_buzz", [])
+        if reddit_buzz:
+            doc  = reddit_buzz[0]
+            meta = doc.get("metadata", {})
+            rank     = meta.get("rank", "N/A")
+            rank_ago = meta.get("rank_24h_ago", "N/A")
+            mentions = meta.get("mentions", 0)
+            upvotes  = meta.get("upvotes", 0)
+            # Derive trend label from ranks
+            if isinstance(rank, int) and isinstance(rank_ago, int) and rank_ago > 0:
+                if rank < rank_ago:
+                    trend = "RISING 📈"
+                elif rank > rank_ago:
+                    trend = "FALLING 📉"
+                else:
+                    trend = "STABLE ➡️"
+            else:
+                trend = "NEW ENTRY"
+            lines.append(
+                f"  Reddit Buzz: Rank #{rank} {trend} (was #{rank_ago}) | "
+                f"{mentions:,} mentions | {upvotes:,} upvotes"
+            )
+        else:
+            lines.append("  Reddit Buzz: Not ranked (low Reddit activity)")
 
     return "\n".join(lines)
 
@@ -208,7 +277,7 @@ def synthesize(context: dict) -> AnalysisOutput:
 
     Args:
         context: Unified context dict from retrieve_all() containing
-                 news, social, insider, and price data for ONE ticker.
+                 news, social, insider, price, and reddit_buzz data.
 
     Returns:
         AnalysisOutput: Fully validated analysis with narrative + knowledge graph.
@@ -225,7 +294,7 @@ def synthesize(context: dict) -> AnalysisOutput:
             {"role": "user",   "content": formatted_context},
         ],
         response_format=AnalysisOutput,
-        temperature=0.2,  # Low temperature = consistent, precise analysis
+        temperature=0.2,
     )
 
     result = response.choices[0].message.parsed
@@ -248,8 +317,7 @@ def synthesize_general(contexts: list[dict], query: str) -> GeneralAnalysisOutpu
 
     Args:
         contexts: List of unified context dicts, one per ticker.
-                  Each dict has the same structure as retrieve_all() output.
-        query:    The original user question (no ticker was identified).
+        query:    The original user question.
 
     Returns:
         GeneralAnalysisOutput: Validated comparative analysis + knowledge graph.
@@ -301,6 +369,7 @@ if __name__ == "__main__":
 
     n = output.narrative
     print(f"\n📋 SUMMARY\n  {n.summary}")
+    print(f"\n📱 REDDIT BUZZ\n  {n.reddit_buzz_signal}")
     print(f"\n⚠️  CONTRADICTIONS\n  {n.contradictions}")
     print(f"\n🎯 CONCLUSION [Risk: {n.risk_level.value}]\n  {n.conclusion}")
 
@@ -308,7 +377,7 @@ if __name__ == "__main__":
     print("  [TEST B] Cross-portfolio synthesis")
     print("=" * 60)
 
-    GENERAL_QUERY = "Which stocks have the most aggressive insider selling?"
+    GENERAL_QUERY = "Which stocks are trending on Reddit right now?"
     contexts = asyncio.run(run_cross_portfolio_retrieval(GENERAL_QUERY))
     general_output = synthesize_general(contexts, GENERAL_QUERY)
 
