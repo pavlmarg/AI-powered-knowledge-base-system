@@ -1,7 +1,7 @@
 """
 ingestion/run_ingestion.py
 --------------------------
-Master script that runs all three ingestion pipelines in sequence.
+Master script that runs all ingestion pipelines in sequence.
 
 Usage (from the /backend directory):
     python -m ingestion.run_ingestion
@@ -14,11 +14,12 @@ needing terminal access.
 from ingestion.ingest_news import ingest_news
 from ingestion.ingest_social import ingest_social
 from ingestion.ingest_insider import ingest_insider
+from ingestion.ingest_reddit_buzz import ingest_reddit_buzz
 
 
 def run_all_ingestion() -> dict:
     """
-    Execute all three ingestion pipelines sequentially.
+    Execute all ingestion pipelines sequentially.
     Returns a summary dict with counts per layer.
     """
     print("\n" + "="*55)
@@ -34,20 +35,25 @@ def run_all_ingestion() -> dict:
     print("\n── Layer 3: Insider Trading Records ────────────────")
     insider_count = ingest_insider()
 
-    total = news_count + social_count + insider_count
+    print("\n── Layer 5: Reddit Buzz (ApeWisdom) ────────────────")
+    reddit_buzz_count = ingest_reddit_buzz()
+
+    total = news_count + social_count + insider_count + reddit_buzz_count
 
     print("\n" + "="*55)
     print(f"  Ingestion complete — {total} total documents")
-    print(f"    News     : {news_count}")
-    print(f"    Social   : {social_count}")
-    print(f"    Insider  : {insider_count}")
+    print(f"    News        : {news_count}")
+    print(f"    Social      : {social_count}")
+    print(f"    Insider     : {insider_count}")
+    print(f"    Reddit Buzz : {reddit_buzz_count}")
     print("="*55 + "\n")
 
     return {
-        "news"    : news_count,
-        "social"  : social_count,
-        "insider" : insider_count,
-        "total"   : total,
+        "news"        : news_count,
+        "social"      : social_count,
+        "insider"     : insider_count,
+        "reddit_buzz" : reddit_buzz_count,
+        "total"       : total,
     }
 
 

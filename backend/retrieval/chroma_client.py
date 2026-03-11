@@ -19,6 +19,7 @@ from core.config import (
     COLLECTION_NEWS,
     COLLECTION_SOCIAL,
     COLLECTION_INSIDER,
+    COLLECTION_REDDIT_BUZZ,
 )
 
 # ── Client (singleton pattern) ────────────────────────────────────────────────
@@ -60,13 +61,18 @@ def get_insider_collection() -> chromadb.Collection:
     return get_collection(COLLECTION_INSIDER)
 
 
+def get_reddit_buzz_collection() -> chromadb.Collection:
+    """Layer 5 — ApeWisdom Reddit buzz signals."""
+    return get_collection(COLLECTION_REDDIT_BUZZ)
+
+
 def reset_all_collections() -> None:
     """
-    Drop and recreate all three collections.
+    Drop and recreate all collections.
     Used by the POST /ingest endpoint to allow a clean re-ingestion.
     """
     client = get_client()
-    for name in [COLLECTION_NEWS, COLLECTION_SOCIAL, COLLECTION_INSIDER]:
+    for name in [COLLECTION_NEWS, COLLECTION_SOCIAL, COLLECTION_INSIDER, COLLECTION_REDDIT_BUZZ]:
         try:
             client.delete_collection(name)
         except Exception:

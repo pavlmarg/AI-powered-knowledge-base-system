@@ -9,8 +9,9 @@ This endpoint allows judges and users to:
   - Reset the knowledge base if collections become corrupted
 
 What it does:
-  1. Drops all three ChromaDB collections (layer_news, layer_social, layer_insider)
-  2. Re-runs the full ingestion pipeline (all 3 layers)
+  1. Drops all ChromaDB collections (layer_news, layer_social,
+     layer_insider, layer_reddit_buzz)
+  2. Re-runs the full ingestion pipeline (all layers)
   3. Returns a summary of how many documents were ingested per layer
 
 Security note:
@@ -29,6 +30,7 @@ from retrieval.chroma_client import (
     get_news_collection,
     get_social_collection,
     get_insider_collection,
+    get_reddit_buzz_collection,
 )
 from ingestion.run_ingestion import run_all_ingestion
 
@@ -63,21 +65,18 @@ async def ingest():
 
     This will:
       1. Delete all existing vectors from ChromaDB
-      2. Re-embed and re-index all 226 documents across 3 layers
+      2. Re-embed and re-index all documents across all layers
       3. Return document counts per layer on completion
 
     Note: This operation takes 15-30 seconds due to OpenAI embedding calls.
     """
     try:
-        # Step 1: Reset all collections
         reset_all_collections()
-
-        # Step 2: Re-run full ingestion pipeline
         counts = run_all_ingestion()
 
         return IngestResponse(
             status  = "success",
-            message = f"Successfully ingested {counts['total']} documents across 3 layers.",
+            message = f"Successfully ingested {counts['total']} documents across all layers.",
             counts  = counts,
         )
 
@@ -100,17 +99,19 @@ async def ingest_status():
     Does NOT trigger re-ingestion — read-only status check.
     """
     try:
-        news_count    = get_news_collection().count()
-        social_count  = get_social_collection().count()
-        insider_count = get_insider_collection().count()
-        total         = news_count + social_count + insider_count
+        news_count         = get_news_collection().count()
+        social_count       = get_social_collection().count()
+        insider_count      = get_insider_collection().count()
+        reddit_buzz_count  = get_reddit_buzz_collection().count()
+        total              = news_count + social_count + insider_count + reddit_buzz_count
 
         return StatusResponse(
             status="online",
             counts={
-                "news"   : news_count,
-                "social" : social_count,
-                "insider": insider_count,
+                "news"        : news_count,
+                "social"      : social_count,
+                "insider"     : insider_count,
+                "reddit_buzz" : reddit_buzz_count,
             },
             total=total,
         )

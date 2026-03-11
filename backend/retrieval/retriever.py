@@ -1,7 +1,7 @@
 """
 retrieval/retriever.py
 ----------------------
-ChromaDB semantic retrieval functions for all three data layers.
+ChromaDB semantic retrieval functions for all data layers.
 
 Each function:
   1. Embeds the user query using the same model used during ingestion
@@ -18,9 +18,10 @@ Why metadata filtering matters:
   the user is asking about — this is what makes contradiction detection reliable.
 
 Top-K values per layer (tuned for synthesis context window):
-  News    : top 3  — articles are long, 3 is enough context
-  Social  : top 5  — posts are short, more gives richer sentiment signal
-  Insider : top 3  — 50 records total, 3 covers the most relevant trades
+  News         : top 3  — articles are long, 3 is enough context
+  Social       : top 5  — posts are short, more gives richer sentiment signal
+  Insider      : top 3  — 50 records total, 3 covers the most relevant trades
+  Reddit Buzz  : top 1  — one document per ticker per day by design
 """
 
 from ingestion.embedder import embed_texts
@@ -28,12 +29,14 @@ from retrieval.chroma_client import (
     get_news_collection,
     get_social_collection,
     get_insider_collection,
+    get_reddit_buzz_collection,
 )
 
 # Number of results to retrieve per layer
-TOP_K_NEWS    = 3
-TOP_K_SOCIAL  = 5
-TOP_K_INSIDER = 3
+TOP_K_NEWS        = 3
+TOP_K_SOCIAL      = 5
+TOP_K_INSIDER     = 3
+TOP_K_REDDIT_BUZZ = 1   # One doc per ticker per day — always return it if it exists
 
 
 def _embed_query(query: str) -> list[float]:
@@ -79,8 +82,8 @@ def retrieve_news(ticker: str, query: str) -> list[dict]:
           metadata  — ticker, layer, date_ts, date_str, title
           relevance — cosine similarity score (0-1)
     """
-    collection    = get_news_collection()
-    query_vector  = _embed_query(query)
+    collection   = get_news_collection()
+    query_vector = _embed_query(query)
 
     results = collection.query(
         query_embeddings=[query_vector],
@@ -148,31 +151,63 @@ def retrieve_insider(ticker: str, query: str) -> list[dict]:
     return _format_results(results)
 
 
+def retrieve_reddit_buzz(ticker: str, query: str) -> list[dict]:
+    """
+    Retrieve the Reddit buzz signal for a given ticker (Layer 5).
+
+    Layer 5 stores one document per ticker per day — a quantitative
+    summary of Reddit activity (rank, mentions, upvotes, momentum).
+
+    Uses a count-first pattern to avoid the ChromaDB crash that occurs
+    when n_results exceeds the number of documents matching the filter.
+    Returns an empty list (never raises) if no data exists.
+
+    Args:
+        ticker : Stock ticker e.g. "GME"
+        query  : Natural language query (used for semantic ranking)
+
+    Returns:
+        List of up to 1 result dict containing:
+          document  — the Reddit buzz summary text
+          metadata  — ticker, layer, rank, rank_24h_ago, mentions,
+                      upvotes, date_ts, date_str
+          relevance — cosine similarity score (0-1)
+    """
+    try:
+        collection   = get_reddit_buzz_collection()
+        query_vector = _embed_query(query)
+
+        # Count first — ChromaDB throws if n_results > actual doc count
+        count_check  = collection.get(
+            where={"ticker": {"$eq": ticker}},
+            limit=TOP_K_REDDIT_BUZZ,
+        )
+        actual_count = len(count_check.get("ids", []))
+
+        if actual_count == 0:
+            return []
+
+        results = collection.query(
+            query_embeddings=[query_vector],
+            n_results=min(TOP_K_REDDIT_BUZZ, actual_count),
+            where={"ticker": {"$eq": ticker}},
+            include=["documents", "metadatas", "distances"],
+        )
+
+        return _format_results(results)
+
+    except Exception as e:
+        print(f"[Retriever] ⚠️  Reddit buzz retrieval failed for {ticker}: {e}")
+        return []
+
+
 if __name__ == "__main__":
     # Quick test — run with: python -m retrieval.retriever
-    # Tests retrieval across all 3 layers for GME
     TEST_TICKER = "GME"
     TEST_QUERY  = "What is happening with GameStop stock?"
 
-    print(f"\n{'='*55}")
-    print(f"  Retrieval test for {TEST_TICKER}")
-    print(f"  Query: '{TEST_QUERY}'")
-    print(f"{'='*55}")
-
-    print(f"\n── Layer 1: News ───────────────────────────────────")
-    news_results = retrieve_news(TEST_TICKER, TEST_QUERY)
-    for r in news_results:
-        print(f"  [{r['relevance']}] {r['metadata'].get('title', r['document'][:80])}")
-
-    print(f"\n── Layer 2: Social ─────────────────────────────────")
-    social_results = retrieve_social(TEST_TICKER, TEST_QUERY)
-    for r in social_results:
-        print(f"  [{r['relevance']}] {r['document'][:100]}")
-
-    print(f"\n── Layer 3: Insider ────────────────────────────────")
-    insider_results = retrieve_insider(TEST_TICKER, TEST_QUERY)
-    for r in insider_results:
-        meta = r['metadata']
-        print(f"  [{r['relevance']}] {meta.get('executive_role')} {meta.get('action')} {meta.get('shares_volume'):,} shares")
-
-    print()
+    print(f"\nTesting retrieval for {TEST_TICKER}...")
+    print(f"News       : {len(retrieve_news(TEST_TICKER, TEST_QUERY))} results")
+    print(f"Social     : {len(retrieve_social(TEST_TICKER, TEST_QUERY))} results")
+    print(f"Insider    : {len(retrieve_insider(TEST_TICKER, TEST_QUERY))} results")
+    print(f"RedditBuzz : {len(retrieve_reddit_buzz(TEST_TICKER, TEST_QUERY))} results")

@@ -34,9 +34,10 @@ CHROMA_HOST: str = os.getenv("CHROMA_HOST", "chromadb")   # Docker service name
 CHROMA_PORT: int = int(os.getenv("CHROMA_PORT", "8000"))
 
 # Collection names — one per data layer
-COLLECTION_NEWS: str    = "layer_news"
-COLLECTION_SOCIAL: str  = "layer_social"
-COLLECTION_INSIDER: str = "layer_insider"
+COLLECTION_NEWS: str        = "layer_news"
+COLLECTION_SOCIAL: str      = "layer_social"
+COLLECTION_INSIDER: str     = "layer_insider"
+COLLECTION_REDDIT_BUZZ: str = "layer_reddit_buzz"   # Layer 5 — ApeWisdom Reddit buzz
 
 # ── Data paths (Layer 2 + 3 still use static JSON) ───────────────────────────
 DATA_DIR: str     = os.path.join(os.path.dirname(__file__), "..", "..", "data")
@@ -53,15 +54,23 @@ SEED_TICKERS: set = {
 }
 
 # ── Cache TTL ─────────────────────────────────────────────────────────────────
-# If the newest news doc for a ticker is older than this, re-fetch from Finnhub.
-NEWS_CACHE_TTL_DAYS: int = 7
+# If the newest doc for a ticker is older than this, re-fetch from the source.
+NEWS_CACHE_TTL_DAYS:        int = 7   # Re-fetch Finnhub news after 7 days
+REDDIT_BUZZ_CACHE_TTL_DAYS: int = 1   # Re-fetch ApeWisdom Reddit buzz after 1 day
 
 # ── Finnhub news fetch window ─────────────────────────────────────────────────
 # How many calendar days back to pull news articles per ticker.
 NEWS_FETCH_DAYS: int = 30
 
+# ── ApeWisdom (Layer 5) ───────────────────────────────────────────────────────
+# Free public Reddit sentiment API — no API key or registration required.
+# Aggregates mentions from r/wallstreetbets, r/stocks, r/investing and more.
+# Paginated at 100 results/page (~8 pages covers all ~800 tracked tickers).
+# Base URL — ingest_reddit_buzz.py appends /page/{n} for pagination.
+APEWISDOM_URL: str = "https://apewisdom.io/api/v1.0/filter/all-stocks"
+
 # ── Engagement score weights (Layer 2 normalisation) ─────────────────────────
-# Twitter:  likes * 1  +  retweets * 3  +  views * 0.01
-# Reddit:   upvotes * 1  +  comments * 2
+# Twitter: likes * 1  +  retweets * 3  +  views * 0.01
+# Reddit:  upvotes * 1  +  comments * 2
 TWITTER_WEIGHTS: dict = {"likes": 1, "retweets": 3, "views": 0.01}
 REDDIT_WEIGHTS: dict  = {"upvotes": 1, "comments": 2}
