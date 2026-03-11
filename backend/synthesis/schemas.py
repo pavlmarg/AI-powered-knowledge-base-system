@@ -13,31 +13,30 @@ Why this matters:
   these Pydantic models, we get a 100% guarantee that every response
   conforms exactly to this schema. No validation errors, no crashes.
 
-Output structure — two parts:
+Output structures — two paths:
 
-  Part 1: AnalysisNarrative
-  ─────────────────────────
-  A structured Chain-of-Thought breakdown of the financial situation:
-    - summary          : one-line verdict
-    - news_analysis    : what the news says
-    - social_sentiment : what the crowd thinks (bull/bear/mixed)
-    - insider_activity : what insiders are actually doing
-    - price_context    : what the live price signals
-    - contradictions   : the key conflicts between the above signals
-    - conclusion       : final synthesized assessment
-    - risk_level       : LOW / MEDIUM / HIGH / VERY_HIGH
+  Path A: AnalysisOutput  (single-stock deep dive)
+  ─────────────────────────────────────────────────
+  Part 1: AnalysisNarrative — structured CoT breakdown:
+    - summary, news_analysis, social_sentiment, insider_activity,
+      price_context, contradictions, conclusion, risk_level
 
-  Part 2: KnowledgeGraph
-  ──────────────────────
-  React Flow compatible graph structure:
+  Part 2: KnowledgeGraph — React Flow compatible:
     - nodes : entities (Company, Person, Sentiment, Event, Price)
     - edges : relationships between entities
 
-  The frontend renders this directly as an interactive graph.
+  Path B: GeneralAnalysisOutput  (cross-portfolio / general questions)
+  ──────────────────────────────────────────────────────────────────────
+  Used when no specific ticker is identified. Returns:
+    - answer        : direct response to the question
+    - methodology   : how the answer was derived
+    - ticker_insights : per-ticker mini-summaries relevant to the question
+    - top_ticker    : the most relevant ticker if one stands out
+    - knowledge_graph : a comparative graph across multiple companies
 """
 
 from pydantic import BaseModel, Field
-from typing import List
+from typing import List, Optional
 from enum import Enum
 
 
@@ -63,6 +62,12 @@ class NodeType(str, Enum):
     SENTIMENT = "Sentiment"
     EVENT     = "Event"
     PRICE     = "Price"
+
+
+class QueryType(str, Enum):
+    SINGLE_STOCK  = "single_stock"   # e.g. "Should I buy GME?"
+    CROSS_PORTFOLIO = "cross_portfolio"  # e.g. "Which stock has the most bearish insiders?"
+    GENERAL       = "general"        # e.g. "What is insider trading?"
 
 
 # ── Knowledge Graph Models ────────────────────────────────────────────────────
@@ -125,7 +130,7 @@ class KnowledgeGraph(BaseModel):
     )
 
 
-# ── Narrative Analysis Model ──────────────────────────────────────────────────
+# ── Narrative Analysis Model (Single-Stock) ───────────────────────────────────
 
 class AnalysisNarrative(BaseModel):
     """
@@ -170,14 +175,65 @@ class AnalysisNarrative(BaseModel):
     )
 
 
-# ── Final Unified Output ──────────────────────────────────────────────────────
+# ── Single-Stock Final Output ─────────────────────────────────────────────────
 
 class AnalysisOutput(BaseModel):
     """
-    The complete output of the synthesis engine.
+    The complete output of the synthesis engine for a single-stock query.
     Contains both the narrative analysis and the knowledge graph.
     This is what the FastAPI endpoint returns to the frontend.
     """
-    ticker          : str              = Field(..., description="The stock ticker analysed.")
+    ticker          : str               = Field(..., description="The stock ticker analysed.")
     narrative       : AnalysisNarrative = Field(..., description="Structured CoT analysis.")
-    knowledge_graph : KnowledgeGraph   = Field(..., description="React Flow compatible graph.")
+    knowledge_graph : KnowledgeGraph    = Field(..., description="React Flow compatible graph.")
+
+
+# ── Cross-Portfolio / General Analysis Models ─────────────────────────────────
+
+class TickerInsight(BaseModel):
+    """
+    A mini-summary for one ticker within a cross-portfolio response.
+    Used when the user asks a comparative or general question.
+    """
+    ticker          : str           = Field(..., description="Stock ticker e.g. 'GME'.")
+    relevance_score : float         = Field(..., description="0-1 score of how relevant this ticker is to the question.")
+    summary         : str           = Field(..., description="1-2 sentence insight about this ticker relevant to the question.")
+    sentiment_label : SentimentLabel = Field(..., description="Social sentiment for this ticker.")
+    risk_level      : RiskLevel     = Field(..., description="Risk level for this ticker.")
+    key_signal      : str           = Field(..., description="The single most important signal for this ticker e.g. 'CEO sold 5M shares this week'.")
+
+
+class GeneralAnalysisNarrative(BaseModel):
+    """
+    Structured response for cross-portfolio or general financial questions.
+    """
+    answer: str = Field(
+        ...,
+        description="Direct answer to the user's question in 2-4 sentences."
+    )
+    methodology: str = Field(
+        ...,
+        description="1-2 sentences explaining how this answer was derived from the data layers."
+    )
+    ticker_insights: List[TickerInsight] = Field(
+        ...,
+        description="Ranked list of the most relevant tickers to this question, most relevant first. Include all tickers with meaningful signal."
+    )
+    top_ticker: Optional[str] = Field(
+        default=None,
+        description="The single most relevant ticker if one clearly stands out, else null."
+    )
+    conclusion: str = Field(
+        ...,
+        description="2-3 sentence synthesized conclusion across all analysed data."
+    )
+
+
+class GeneralAnalysisOutput(BaseModel):
+    """
+    The complete output for cross-portfolio or general questions.
+    Returns a comparative narrative + a multi-company knowledge graph.
+    """
+    query_type      : QueryType              = Field(..., description="Classification of the query type.")
+    narrative       : GeneralAnalysisNarrative = Field(..., description="Structured comparative analysis.")
+    knowledge_graph : KnowledgeGraph          = Field(..., description="React Flow compatible comparative graph.")

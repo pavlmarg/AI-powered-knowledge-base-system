@@ -1,27 +1,22 @@
 """
 synthesis/synthesizer.py
 ------------------------
-The reasoning engine — takes the unified context from the parallel
-retrieval workflow and produces a structured analysis using gpt-4.1
-with Chain-of-Thought prompting and OpenAI Structured Outputs.
+The reasoning engine — takes unified context from the parallel retrieval
+workflow and produces structured analysis using gpt-4.1 with Chain-of-Thought
+prompting and OpenAI Structured Outputs.
 
-How it works:
-  1. Formats the retrieved context (news, social, insider, price)
-     into a clean text block for the LLM prompt
-  2. Calls gpt-4.1 with:
-       - A system prompt that defines the analyst persona and
-         Chain-of-Thought reasoning instructions
-       - The formatted context as the user message
-       - response_format=AnalysisOutput (Structured Outputs)
-  3. Returns a fully validated AnalysisOutput object —
-     guaranteed to match the schema, no parsing errors
+Two synthesis paths:
 
-Why Chain-of-Thought (CoT) prompting:
-  A naive prompt like "analyse this stock" produces shallow results.
-  CoT forces the model to reason step by step:
-    news → social → insider → price → contradictions → conclusion
-  Each step builds on the previous, producing deeper insights and
-  catching contradictions that a single-pass prompt would miss.
+  Path A: synthesize(context)
+  ───────────────────────────
+  Single-stock deep dive. Takes the unified context dict from retrieve_all()
+  and returns a fully validated AnalysisOutput with narrative + knowledge graph.
+
+  Path B: synthesize_general(contexts, query)
+  ────────────────────────────────────────────
+  Cross-portfolio or general question. Takes a list of context dicts (one per
+  ticker) plus the original question and returns a GeneralAnalysisOutput with
+  a comparative narrative + multi-company knowledge graph.
 
 Why Structured Outputs over JSON mode:
   JSON mode guarantees valid JSON syntax but NOT schema adherence —
@@ -31,11 +26,12 @@ Why Structured Outputs over JSON mode:
 
 from openai import OpenAI
 from core.config import OPENAI_API_KEY, SYNTHESIS_MODEL
-from synthesis.schemas import AnalysisOutput
+from synthesis.schemas import AnalysisOutput, GeneralAnalysisOutput
 
 _client = OpenAI(api_key=OPENAI_API_KEY)
 
-# ── Prompt Engineering ────────────────────────────────────────────────────────
+
+# ── Single-Stock Prompt ───────────────────────────────────────────────────────
 
 SYSTEM_PROMPT = """You are an elite financial intelligence analyst specialising in 
 detecting market signals, insider activity patterns, and contradictions between 
@@ -56,25 +52,41 @@ REASONING APPROACH — follow this chain of thought strictly:
   Step 3: What are insiders actually doing? Are they buying or selling?
   Step 4: What does the current price and daily movement signal?
   Step 5: What is the most critical contradiction between these signals?
-  Step 6: What is your final synthesized assessment?
+  Step 6: What is your final synthesized assessment?"""
 
-IMPORTANT RULES:
-  - Be precise and evidence-based — cite specific numbers from the data
-  - Insider activity is the strongest signal — weight it heavily
-  - When retail sentiment contradicts insider activity, flag this prominently
-  - The contradictions field is the most valuable output — be specific
-  - Risk levels: LOW=aligned signals, MEDIUM=minor divergence, 
-    HIGH=significant contradiction, VERY_HIGH=extreme divergence
-  - For the knowledge graph: create nodes for the company, key executives 
-    mentioned, sentiment entities, key events, and the current price
-  - Every edge source and target MUST exactly match an existing node id
-"""
 
+# ── General / Cross-Portfolio Prompt ─────────────────────────────────────────
+
+GENERAL_SYSTEM_PROMPT = """You are an elite financial intelligence analyst with access 
+to a multi-layer knowledge base covering 10 stocks: AAPL, BA, GME, JPM, NEE, NVDA, 
+PFE, PLTR, TSLA, XOM.
+
+You will be given intelligence briefs from multiple stocks and a user question.
+Your job is to answer the question by synthesizing signals across the entire portfolio.
+
+This includes:
+  - Comparative questions: "Which stock has the most bearish insiders?"
+  - Ranking questions: "Which companies have the highest retail enthusiasm?"
+  - Thematic questions: "Are there any stocks where insiders and retail disagree?"
+  - General questions about market trends visible across the portfolio
+
+REASONING APPROACH:
+  Step 1: Understand exactly what the user is asking.
+  Step 2: For each ticker in the brief, extract the signal most relevant to the question.
+  Step 3: Rank or compare tickers based on those signals.
+  Step 4: Identify the clearest answer and any interesting patterns.
+  Step 5: Synthesize a direct, confident conclusion.
+
+Be specific — use actual data from the briefs (share volumes, sentiment scores,
+price movements) rather than generic statements."""
+
+
+# ── Context Formatters ────────────────────────────────────────────────────────
 
 def _format_context(context: dict) -> str:
     """
-    Format the unified retrieval context into a structured text prompt.
-    This is what gpt-4.1 receives as its intelligence brief.
+    Format a single-ticker unified context dict into an LLM-readable
+    intelligence brief string.
     """
     ticker = context["ticker"]
     query  = context["query"]
@@ -129,23 +141,82 @@ def _format_context(context: dict) -> str:
     return "\n".join(lines)
 
 
+def _format_multi_context(contexts: list[dict], query: str) -> str:
+    """
+    Format multiple single-ticker contexts into a combined brief for
+    cross-portfolio synthesis. Each ticker gets a compact section.
+    """
+    lines = []
+    lines.append(f"USER QUESTION: {query}")
+    lines.append(f"PORTFOLIO INTELLIGENCE BRIEF — {len(contexts)} stocks")
+    lines.append("=" * 60)
+
+    for context in contexts:
+        ticker = context["ticker"]
+        price  = context["price"]
+
+        lines.append(f"\n{'─' * 40}")
+        lines.append(f"TICKER: {ticker}")
+
+        # Compact price line
+        if "error" not in price:
+            lines.append(
+                f"  Price: ${price.get('current_price', 'N/A')} "
+                f"({price.get('change_pct', 'N/A')}% today)"
+            )
+
+        # Top news headline only (keep brief)
+        if context["news"]:
+            top_news = context["news"][0]
+            meta = top_news.get("metadata", {})
+            lines.append(f"  Top News: {meta.get('title', 'N/A')} [{meta.get('date_str', '')}]")
+            lines.append(f"    {top_news.get('document', '')[:200]}...")
+
+        # Social — top post by engagement
+        if context["social"]:
+            top_social = context["social"][0]
+            meta = top_social.get("metadata", {})
+            lines.append(
+                f"  Top Social [{meta.get('platform', '')}] "
+                f"engagement={meta.get('engagement_score', 0):.0f}: "
+                f"{top_social.get('document', '')[:150]}..."
+            )
+
+        # Insider — all trades (this is the key signal layer)
+        if context["insider"]:
+            lines.append(f"  Insider Trades ({len(context['insider'])}):")
+            for doc in context["insider"]:
+                meta = doc.get("metadata", {})
+                lines.append(
+                    f"    • {meta.get('executive_role', '')} "
+                    f"{meta.get('action', '')} "
+                    f"{meta.get('shares_volume', 0):,} shares "
+                    f"[{meta.get('date_str', '')}]"
+                )
+
+    return "\n".join(lines)
+
+
+# ── Synthesis Functions ───────────────────────────────────────────────────────
+
 def synthesize(context: dict) -> AnalysisOutput:
     """
-    Run the synthesis engine on a unified retrieval context.
+    Run the synthesis engine on a single-ticker unified retrieval context.
 
     Uses gpt-4.1 with Structured Outputs to guarantee the response
     exactly matches the AnalysisOutput Pydantic schema.
 
     Args:
         context: Unified context dict from retrieve_all() containing
-                 news, social, insider, and price data
+                 news, social, insider, and price data for ONE ticker.
 
     Returns:
-        AnalysisOutput: Fully validated analysis with narrative + knowledge graph
+        AnalysisOutput: Fully validated analysis with narrative + knowledge graph.
     """
     formatted_context = _format_context(context)
 
-    print(f"\n[Synthesizer] Calling {SYNTHESIS_MODEL}...")
+    print(f"\n[Synthesizer] Single-stock synthesis for {context['ticker']}...")
+    print(f"[Synthesizer] Calling {SYNTHESIS_MODEL}...")
 
     response = _client.beta.chat.completions.parse(
         model=SYNTHESIS_MODEL,
@@ -159,7 +230,7 @@ def synthesize(context: dict) -> AnalysisOutput:
 
     result = response.choices[0].message.parsed
 
-    print(f"[Synthesizer] ✅ Analysis complete.")
+    print(f"[Synthesizer] ✅ Single-stock analysis complete.")
     print(f"  Risk Level  : {result.narrative.risk_level.value}")
     print(f"  Sentiment   : {result.narrative.sentiment_label.value}")
     print(f"  Graph Nodes : {len(result.knowledge_graph.nodes)}")
@@ -168,61 +239,83 @@ def synthesize(context: dict) -> AnalysisOutput:
     return result
 
 
+def synthesize_general(contexts: list[dict], query: str) -> GeneralAnalysisOutput:
+    """
+    Run cross-portfolio synthesis for general or comparative questions.
+
+    Takes intelligence briefs from multiple tickers and answers the user's
+    question by synthesizing signals across the whole portfolio.
+
+    Args:
+        contexts: List of unified context dicts, one per ticker.
+                  Each dict has the same structure as retrieve_all() output.
+        query:    The original user question (no ticker was identified).
+
+    Returns:
+        GeneralAnalysisOutput: Validated comparative analysis + knowledge graph.
+    """
+    formatted_context = _format_multi_context(contexts, query)
+
+    tickers_covered = [c["ticker"] for c in contexts]
+    print(f"\n[Synthesizer] Cross-portfolio synthesis across {tickers_covered}...")
+    print(f"[Synthesizer] Calling {SYNTHESIS_MODEL}...")
+
+    response = _client.beta.chat.completions.parse(
+        model=SYNTHESIS_MODEL,
+        messages=[
+            {"role": "system", "content": GENERAL_SYSTEM_PROMPT},
+            {"role": "user",   "content": formatted_context},
+        ],
+        response_format=GeneralAnalysisOutput,
+        temperature=0.2,
+    )
+
+    result = response.choices[0].message.parsed
+
+    print(f"[Synthesizer] ✅ Cross-portfolio analysis complete.")
+    print(f"  Query Type  : {result.query_type.value}")
+    print(f"  Top Ticker  : {result.narrative.top_ticker or 'N/A'}")
+    print(f"  Insights    : {len(result.narrative.ticker_insights)} tickers")
+    print(f"  Graph Nodes : {len(result.knowledge_graph.nodes)}")
+    print(f"  Graph Edges : {len(result.knowledge_graph.edges)}")
+
+    return result
+
+
+# ── Dev / Test ────────────────────────────────────────────────────────────────
+
 if __name__ == "__main__":
-    # Full end-to-end test — run with: python -m synthesis.synthesizer
-    # This is the first time the complete RAG pipeline runs:
-    # Retrieval → Context → gpt-4.1 → Structured Output
+    import asyncio
     import json
-    from retrieval.workflow import retrieve_all
+    from retrieval.workflow import retrieve_all, run_cross_portfolio_retrieval
+
+    print("\n" + "=" * 60)
+    print("  [TEST A] Single-stock synthesis")
+    print("=" * 60)
 
     TEST_TICKER = "GME"
     TEST_QUERY  = "Should I buy GME stock right now?"
 
-    print(f"\n{'='*60}")
-    print(f"  Full RAG Pipeline Test")
-    print(f"  Ticker : {TEST_TICKER}")
-    print(f"  Query  : {TEST_QUERY}")
-    print(f"{'='*60}")
-
-    # Step 1: Retrieve
-    context = retrieve_all(TEST_TICKER, TEST_QUERY)
-
-    # Step 2: Synthesize
-    output = synthesize(context)
-
-    # Step 3: Display results
-    print(f"\n{'='*60}")
-    print(f"  ANALYSIS RESULTS")
-    print(f"{'='*60}")
+    context = asyncio.run(retrieve_all(TEST_TICKER, TEST_QUERY))
+    output  = synthesize(context)
 
     n = output.narrative
-    print(f"\n📋 SUMMARY")
-    print(f"  {n.summary}")
+    print(f"\n📋 SUMMARY\n  {n.summary}")
+    print(f"\n⚠️  CONTRADICTIONS\n  {n.contradictions}")
+    print(f"\n🎯 CONCLUSION [Risk: {n.risk_level.value}]\n  {n.conclusion}")
 
-    print(f"\n📰 NEWS ANALYSIS")
-    print(f"  {n.news_analysis}")
+    print("\n" + "=" * 60)
+    print("  [TEST B] Cross-portfolio synthesis")
+    print("=" * 60)
 
-    print(f"\n📱 SOCIAL SENTIMENT [{n.sentiment_label.value}]")
-    print(f"  {n.social_sentiment}")
+    GENERAL_QUERY = "Which stocks have the most aggressive insider selling?"
+    contexts = asyncio.run(run_cross_portfolio_retrieval(GENERAL_QUERY))
+    general_output = synthesize_general(contexts, GENERAL_QUERY)
 
-    print(f"\n🏦 INSIDER ACTIVITY")
-    print(f"  {n.insider_activity}")
-
-    print(f"\n💰 PRICE CONTEXT")
-    print(f"  {n.price_context}")
-
-    print(f"\n⚠️  CONTRADICTIONS")
-    print(f"  {n.contradictions}")
-
-    print(f"\n🎯 CONCLUSION [Risk: {n.risk_level.value}]")
-    print(f"  {n.conclusion}")
-
-    print(f"\n🕸️  KNOWLEDGE GRAPH")
-    print(f"  Nodes ({len(output.knowledge_graph.nodes)}):")
-    for node in output.knowledge_graph.nodes:
-        print(f"    [{node.type.value}] {node.id} — {node.detail}")
-    print(f"  Edges ({len(output.knowledge_graph.edges)}):")
-    for edge in output.knowledge_graph.edges:
-        print(f"    {edge.source} —[{edge.label}]→ {edge.target}")
-
-    print()
+    g = general_output.narrative
+    print(f"\n💬 ANSWER\n  {g.answer}")
+    print(f"\n🏆 TOP TICKER\n  {g.top_ticker}")
+    print(f"\n🎯 CONCLUSION\n  {g.conclusion}")
+    print(f"\n📊 TICKER INSIGHTS:")
+    for insight in g.ticker_insights:
+        print(f"  [{insight.ticker}] {insight.key_signal} (relevance: {insight.relevance_score:.2f})")
