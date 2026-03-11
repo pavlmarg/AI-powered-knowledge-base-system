@@ -18,8 +18,8 @@ Output structures — two paths:
   Path A: AnalysisOutput  (single-stock deep dive)
   ─────────────────────────────────────────────────
   Part 1: AnalysisNarrative — structured CoT breakdown:
-    - summary, news_analysis, social_sentiment, insider_activity,
-      price_context, contradictions, conclusion, risk_level
+    - summary, news_analysis, social_sentiment, reddit_buzz_signal,
+      insider_activity, price_context, contradictions, conclusion, risk_level
 
   Part 2: KnowledgeGraph — React Flow compatible:
     - nodes : entities (Company, Person, Sentiment, Event, Price)
@@ -65,9 +65,9 @@ class NodeType(str, Enum):
 
 
 class QueryType(str, Enum):
-    SINGLE_STOCK  = "single_stock"   # e.g. "Should I buy GME?"
-    CROSS_PORTFOLIO = "cross_portfolio"  # e.g. "Which stock has the most bearish insiders?"
-    GENERAL       = "general"        # e.g. "What is insider trading?"
+    SINGLE_STOCK    = "single_stock"      # e.g. "Should I buy GME?"
+    CROSS_PORTFOLIO = "cross_portfolio"   # e.g. "Which stock has the most bearish insiders?"
+    GENERAL         = "general"           # e.g. "What is insider trading?"
 
 
 # ── Knowledge Graph Models ────────────────────────────────────────────────────
@@ -147,11 +147,21 @@ class AnalysisNarrative(BaseModel):
     )
     social_sentiment: str = Field(
         ...,
-        description="2-3 sentence analysis of the social media sentiment. Note dominant emotion and any extreme views."
+        description="2-3 sentence analysis of the social media sentiment from posts. Note dominant emotion and any extreme views. If no posts available, state that."
+    )
+    reddit_buzz_signal: str = Field(
+        ...,
+        description=(
+            "1-2 sentence analysis of the Reddit buzz data (Layer 5 — ApeWisdom). "
+            "State the rank, mention count, upvote count, and trend direction (RISING/FALLING/STABLE/NEW ENTRY). "
+            "Interpret what this momentum means e.g. 'MSFT is Rank #9 on Reddit (FALLING from #8), with 64 mentions "
+            "and 165 upvotes — modest retail interest, slightly cooling.' "
+            "If no Reddit buzz data is available, explicitly state: 'No Reddit buzz data available for this ticker.'"
+        )
     )
     sentiment_label: SentimentLabel = Field(
         ...,
-        description="Overall social sentiment classification: BULLISH, BEARISH, MIXED, or NEUTRAL."
+        description="Overall social sentiment classification combining social posts AND Reddit buzz: BULLISH, BEARISH, MIXED, or NEUTRAL."
     )
     insider_activity: str = Field(
         ...,
@@ -163,11 +173,15 @@ class AnalysisNarrative(BaseModel):
     )
     contradictions: str = Field(
         ...,
-        description="The most important conflict between signals e.g. insiders selling while retail is bullish. This is the key insight."
+        description=(
+            "The most important conflict between signals e.g. insiders selling while Reddit buzz is RISING and retail is bullish. "
+            "Always consider Reddit momentum vs news sentiment as a potential contradiction. "
+            "This is the key insight."
+        )
     )
     conclusion: str = Field(
         ...,
-        description="2-3 sentence final assessment synthesizing all signals into a coherent view."
+        description="2-3 sentence final assessment synthesizing all signals including Reddit community momentum into a coherent view."
     )
     risk_level: RiskLevel = Field(
         ...,
@@ -195,12 +209,12 @@ class TickerInsight(BaseModel):
     A mini-summary for one ticker within a cross-portfolio response.
     Used when the user asks a comparative or general question.
     """
-    ticker          : str           = Field(..., description="Stock ticker e.g. 'GME'.")
-    relevance_score : float         = Field(..., description="0-1 score of how relevant this ticker is to the question.")
-    summary         : str           = Field(..., description="1-2 sentence insight about this ticker relevant to the question.")
-    sentiment_label : SentimentLabel = Field(..., description="Social sentiment for this ticker.")
-    risk_level      : RiskLevel     = Field(..., description="Risk level for this ticker.")
-    key_signal      : str           = Field(..., description="The single most important signal for this ticker e.g. 'CEO sold 5M shares this week'.")
+    ticker          : str            = Field(..., description="Stock ticker e.g. 'GME'.")
+    relevance_score : float          = Field(..., description="0-1 score of how relevant this ticker is to the question.")
+    summary         : str            = Field(..., description="1-2 sentence insight about this ticker relevant to the question.")
+    sentiment_label : SentimentLabel = Field(..., description="Overall sentiment for this ticker combining all available signals.")
+    risk_level      : RiskLevel      = Field(..., description="Risk level for this ticker.")
+    key_signal      : str            = Field(..., description="The single most important signal for this ticker e.g. 'CEO sold 5M shares' or 'Rank #2 on Reddit, RISING'.")
 
 
 class GeneralAnalysisNarrative(BaseModel):
@@ -234,6 +248,6 @@ class GeneralAnalysisOutput(BaseModel):
     The complete output for cross-portfolio or general questions.
     Returns a comparative narrative + a multi-company knowledge graph.
     """
-    query_type      : QueryType              = Field(..., description="Classification of the query type.")
+    query_type      : QueryType                = Field(..., description="Classification of the query type.")
     narrative       : GeneralAnalysisNarrative = Field(..., description="Structured comparative analysis.")
-    knowledge_graph : KnowledgeGraph          = Field(..., description="React Flow compatible comparative graph.")
+    knowledge_graph : KnowledgeGraph           = Field(..., description="React Flow compatible comparative graph.")
