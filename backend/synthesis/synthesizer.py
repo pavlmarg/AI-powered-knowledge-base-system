@@ -5,23 +5,21 @@ The reasoning engine — takes unified context from the parallel retrieval
 workflow and produces structured analysis using gpt-4.1 with Chain-of-Thought
 prompting and OpenAI Structured Outputs.
 
-Two synthesis paths:
+Layer 3 change:
+  - SYSTEM_PROMPT updated: Step 4 now instructs the model to reason over
+    SEC filings (risk factors, MD&A, 8-K events) instead of insider trades.
+  - _format_context() updated: LAYER 3 section now formats SEC filing chunks
+    with their filing type, date, and section name instead of trade records.
+  - _format_multi_context() updated: cross-portfolio briefs now include
+    the most relevant SEC filing signal per ticker.
 
-  Path A: synthesize(context)
-  ───────────────────────────
-  Single-stock deep dive. Takes the unified context dict from retrieve_all()
-  and returns a fully validated AnalysisOutput with narrative + knowledge graph.
+The key improvement: the model can now say things like:
+  "Tesla's 10-K Risk Factors warn that 'increased competition from legacy
+  automakers could materially reduce our market share' — yet retail sentiment
+  on Reddit is strongly bullish. This is the critical contradiction."
 
-  Path B: synthesize_general(contexts, query)
-  ────────────────────────────────────────────
-  Cross-portfolio or general question. Takes a list of context dicts (one per
-  ticker) plus the original question and returns a GeneralAnalysisOutput with
-  a comparative narrative + multi-company knowledge graph.
-
-Why Structured Outputs over JSON mode:
-  JSON mode guarantees valid JSON syntax but NOT schema adherence —
-  the model might omit fields or use wrong key names, crashing React Flow.
-  Structured Outputs with Pydantic guarantees 100% schema compliance.
+Rather than only:
+  "The CEO sold 500,000 shares."
 """
 
 from openai import OpenAI
@@ -31,16 +29,19 @@ from synthesis.schemas import AnalysisOutput, GeneralAnalysisOutput
 _client = OpenAI(api_key=OPENAI_API_KEY)
 
 
-# ── Single-Stock Prompt ───────────────────────────────────────────────────────
+# ── Single-Stock System Prompt ────────────────────────────────────────────────
 
 SYSTEM_PROMPT = """You are an elite financial intelligence analyst specialising in 
-detecting market signals, insider activity patterns, and contradictions between 
-institutional behaviour and retail sentiment.
+detecting market signals, official company disclosures, and contradictions between 
+what companies officially report and what retail investors believe.
 
 You will be given a multi-layer intelligence brief about a specific stock containing:
   - Layer 1: Recent news articles (fundamental and institutional signals)
   - Layer 2: Social media posts from retail investors (Twitter/Reddit posts)
-  - Layer 3: Insider trading activity (executives buying or selling shares)
+  - Layer 3: SEC EDGAR filings — official documents filed with the US regulator:
+             10-K (annual report): risk factors, management discussion & analysis
+             10-Q (quarterly report): interim financials, updated risks
+             8-K (material event): earnings, M&A announcements, CEO changes
   - Layer 4: Live market price data
   - Layer 5: Reddit Buzz data from ApeWisdom — quantitative Reddit activity:
              rank across r/wallstreetbets and finance subreddits, mention count,
@@ -56,50 +57,64 @@ REASONING APPROACH — follow this chain of thought strictly:
            Use the exact rank, mention count, upvote count, and trend direction.
            A RISING rank with high mentions = growing retail interest.
            A FALLING rank = cooling sentiment even if posts seem positive.
-  Step 4: What are insiders actually doing? Are they buying or selling?
+  Step 4: What do the SEC filings officially disclose?
+           Identify which filing type each chunk comes from (10-K / 10-Q / 8-K).
+           For 10-K / 10-Q: what specific risks does management disclose?
+           What does the MD&A section say about revenue, margins, and outlook?
+           For 8-K: what material event occurred? (earnings beat/miss, M&A, CEO change)
+           Quote or closely paraphrase the most significant management statement.
   Step 5: What does the current price and daily movement signal?
   Step 6: What is the most critical contradiction between these signals?
-           Especially look for: Reddit RISING vs bad news, Reddit FALLING vs
-           bullish posts, insiders selling while Reddit momentum is RISING.
+           Priority contradictions to look for:
+           - SEC risk factors warn of X while Reddit/social is bullish about X
+           - 8-K earnings miss while retail sentiment remains optimistic
+           - MD&A shows declining margins while news is positive
+           - Management language is cautious/hedged while price is rising
   Step 7: What is your final synthesized assessment?
 
 KNOWLEDGE GRAPH INSTRUCTIONS:
-  Always create a dedicated Reddit Buzz node when Layer 5 data is present.
-  Use it as a Sentiment node with label like "Reddit: Rank #9 FALLING" and
-  connect it to the company node and to the overall sentiment node.
-  This node should be connected with edges that show whether it reinforces
-  or contradicts the news and insider signals."""
+  Always create Filing nodes for SEC documents when Layer 3 data is present.
+  Use node type 'Filing' with labels like '10-K: Risk Factors' or '8-K: Earnings'.
+  Connect Filing nodes to the Company node with edges like 'DISCLOSES', 'REPORTS', 'WARNS_OF'.
+  Connect Filing nodes to Sentiment nodes when the filing contradicts retail sentiment.
+  Also create a Reddit Buzz node when Layer 5 data is present."""
 
 
-# ── General / Cross-Portfolio Prompt ─────────────────────────────────────────
+# ── General / Cross-Portfolio System Prompt ───────────────────────────────────
 
 GENERAL_SYSTEM_PROMPT = """You are an elite financial intelligence analyst with access 
 to a multi-layer knowledge base covering 10 stocks: AAPL, BA, GME, JPM, NEE, NVDA, 
 PFE, PLTR, TSLA, XOM.
 
 You will be given intelligence briefs from multiple stocks and a user question.
-Each brief includes news, social posts, insider trades, live price, and Reddit buzz
-signals (rank, mentions, upvotes, trend direction from ApeWisdom).
+Each brief includes news, social posts, official SEC filings (10-K/10-Q/8-K),
+live price, and Reddit buzz signals (rank, mentions, upvotes, trend direction).
+
+Layer 3 is now SEC EDGAR filings — this means you have access to official 
+company language about risks, financial results, and material events. 
+Use this to give answers grounded in what companies officially disclosed,
+not just what media or social media say.
 
 Your job is to answer the question by synthesizing signals across the entire portfolio.
 
 This includes:
-  - Comparative questions: "Which stock has the most bearish insiders?"
+  - Comparative questions: "Which stock has the most risk disclosures?"
   - Ranking questions: "Which companies have the highest retail enthusiasm?"
-  - Thematic questions: "Are there any stocks where insiders and Reddit disagree?"
-  - Reddit-specific: "Which stocks are trending on Reddit right now?"
+  - Thematic questions: "Are there stocks where SEC filings contradict Reddit sentiment?"
+  - SEC-specific: "Which companies had the most material 8-K events recently?"
   - General questions about market trends visible across the portfolio
 
 REASONING APPROACH:
   Step 1: Understand exactly what the user is asking.
   Step 2: For each ticker, extract the signal most relevant to the question.
-          Include Reddit buzz rank and trend direction as a primary signal.
+          Include SEC filing content AND Reddit buzz as primary signals.
   Step 3: Rank or compare tickers based on those signals.
   Step 4: Identify the clearest answer and any interesting cross-ticker patterns.
   Step 5: Synthesize a direct, confident conclusion.
 
-Be specific — use actual numbers from the briefs (share volumes, Reddit ranks,
-mention counts, price movements) rather than generic statements."""
+Be specific — reference actual SEC filing content (risk factor language, 
+revenue figures from MD&A, 8-K event details) alongside Reddit ranks and 
+mention counts rather than generic statements."""
 
 
 # ── Context Formatters ────────────────────────────────────────────────────────
@@ -108,6 +123,9 @@ def _format_context(context: dict) -> str:
     """
     Format a single-ticker unified context dict into an LLM-readable
     intelligence brief string. Includes all 5 layers.
+
+    Layer 3 now formats SEC filing chunks instead of insider trade records.
+    Each chunk includes its filing type, date, and section for clear attribution.
     """
     ticker = context["ticker"]
     query  = context["query"]
@@ -152,18 +170,23 @@ def _format_context(context: dict) -> str:
     else:
         lines.append("  No social media posts available for this ticker.")
 
-    # ── Layer 3: Insider trading ──────────────────────────────────────────────
-    lines.append(f"\n[LAYER 3 — INSIDER TRADING ({len(context['insider'])} retrieved)]")
-    if context["insider"]:
-        for i, doc in enumerate(context["insider"], 1):
+    # ── Layer 3: SEC Filings ──────────────────────────────────────────────────
+    sec_filings = context.get("sec_filings", [])
+    lines.append(f"\n[LAYER 3 — SEC EDGAR FILINGS ({len(sec_filings)} chunks retrieved)]")
+    if sec_filings:
+        for i, doc in enumerate(sec_filings, 1):
             meta = doc.get("metadata", {})
-            lines.append(f"\n  Trade {i}: {meta.get('executive_role', '')} "
-                         f"— {meta.get('action', '')} "
-                         f"{meta.get('shares_volume', 0):,} shares")
-            lines.append(f"  Date    : {meta.get('date_str', 'Unknown')}")
-            lines.append(f"  Detail  : {doc.get('document', '')}")
+            filing_type = meta.get("filing_type", "Unknown")
+            filed_date  = meta.get("filed_date", "Unknown")
+            section     = meta.get("section", "Unknown")
+            acc_no      = meta.get("accession_no", "")
+
+            lines.append(f"\n  Filing {i}: {filing_type} — {section}")
+            lines.append(f"  Filed   : {filed_date}  (Accession: {acc_no})")
+            lines.append(f"  Content : {doc.get('document', '')}")
+            lines.append(f"  Relevance: {doc.get('relevance', 0):.3f}")
     else:
-        lines.append("  No insider trading records available for this ticker.")
+        lines.append("  No SEC filings available for this ticker.")
 
     # ── Layer 5: Reddit Buzz ──────────────────────────────────────────────────
     reddit_buzz = context.get("reddit_buzz", [])
@@ -187,7 +210,7 @@ def _format_multi_context(contexts: list[dict], query: str) -> str:
     """
     Format multiple single-ticker contexts into a combined brief for
     cross-portfolio synthesis. Each ticker gets a compact section
-    including Reddit buzz signal.
+    including the most relevant SEC filing signal.
     """
     lines = []
     lines.append(f"USER QUESTION: {query}")
@@ -219,68 +242,46 @@ def _format_multi_context(contexts: list[dict], query: str) -> str:
         if context["social"]:
             top_social = context["social"][0]
             meta = top_social.get("metadata", {})
-            lines.append(
-                f"  Top Social [{meta.get('platform', '')}] "
-                f"engagement={meta.get('engagement_score', 0):.0f}: "
-                f"{top_social.get('document', '')[:150]}..."
-            )
+            lines.append(f"  Top Social [{meta.get('platform', '')}]: "
+                         f"{top_social.get('document', '')[:150]}...")
 
-        # Insider — all trades (key signal layer)
-        if context["insider"]:
-            lines.append(f"  Insider Trades ({len(context['insider'])}):")
-            for doc in context["insider"]:
-                meta = doc.get("metadata", {})
-                lines.append(
-                    f"    • {meta.get('executive_role', '')} "
-                    f"{meta.get('action', '')} "
-                    f"{meta.get('shares_volume', 0):,} shares "
-                    f"[{meta.get('date_str', '')}]"
-                )
+        # SEC Filings — most relevant chunk (top-1 by semantic relevance)
+        sec_filings = context.get("sec_filings", [])
+        if sec_filings:
+            top_sec  = sec_filings[0]
+            meta     = top_sec.get("metadata", {})
+            lines.append(f"  SEC Filing ({meta.get('filing_type', '?')} "
+                         f"{meta.get('filed_date', '?')} — {meta.get('section', '?')}):")
+            lines.append(f"    {top_sec.get('document', '')[:300]}...")
+        else:
+            lines.append("  SEC Filings: None available")
 
-        # Reddit Buzz — compact one-liner per ticker
+        # Reddit buzz
         reddit_buzz = context.get("reddit_buzz", [])
         if reddit_buzz:
-            doc  = reddit_buzz[0]
-            meta = doc.get("metadata", {})
-            rank     = meta.get("rank", "N/A")
-            rank_ago = meta.get("rank_24h_ago", "N/A")
-            mentions = meta.get("mentions", 0)
-            upvotes  = meta.get("upvotes", 0)
-            # Derive trend label from ranks
-            if isinstance(rank, int) and isinstance(rank_ago, int) and rank_ago > 0:
-                if rank < rank_ago:
-                    trend = "RISING 📈"
-                elif rank > rank_ago:
-                    trend = "FALLING 📉"
-                else:
-                    trend = "STABLE ➡️"
-            else:
-                trend = "NEW ENTRY"
-            lines.append(
-                f"  Reddit Buzz: Rank #{rank} {trend} (was #{rank_ago}) | "
-                f"{mentions:,} mentions | {upvotes:,} upvotes"
-            )
+            meta = reddit_buzz[0].get("metadata", {})
+            rank      = meta.get("rank", "N/A")
+            rank_prev = meta.get("rank_24h_ago", "N/A")
+            mentions  = meta.get("mentions", 0)
+            upvotes   = meta.get("upvotes", 0)
+            trend     = "RISING" if (rank != "N/A" and rank_prev != "N/A" and rank < rank_prev) else \
+                        "FALLING" if (rank != "N/A" and rank_prev != "N/A" and rank > rank_prev) else "STABLE"
+            lines.append(f"  Reddit: Rank #{rank} (was #{rank_prev}) — "
+                         f"{mentions:,} mentions, {upvotes:,} upvotes [{trend}]")
         else:
-            lines.append("  Reddit Buzz: Not ranked (low Reddit activity)")
+            lines.append("  Reddit: Not ranked on ApeWisdom")
 
     return "\n".join(lines)
 
 
-# ── Synthesis Functions ───────────────────────────────────────────────────────
+# ── Synthesis functions ───────────────────────────────────────────────────────
 
 def synthesize(context: dict) -> AnalysisOutput:
     """
-    Run the synthesis engine on a single-ticker unified retrieval context.
+    Run single-stock synthesis with Chain-of-Thought reasoning.
 
     Uses gpt-4.1 with Structured Outputs to guarantee the response
     exactly matches the AnalysisOutput Pydantic schema.
-
-    Args:
-        context: Unified context dict from retrieve_all() containing
-                 news, social, insider, price, and reddit_buzz data.
-
-    Returns:
-        AnalysisOutput: Fully validated analysis with narrative + knowledge graph.
     """
     formatted_context = _format_context(context)
 
@@ -301,7 +302,6 @@ def synthesize(context: dict) -> AnalysisOutput:
 
     print(f"[Synthesizer] ✅ Single-stock analysis complete.")
     print(f"  Risk Level  : {result.narrative.risk_level.value}")
-    print(f"  Sentiment   : {result.narrative.sentiment_label.value}")
     print(f"  Graph Nodes : {len(result.knowledge_graph.nodes)}")
     print(f"  Graph Edges : {len(result.knowledge_graph.edges)}")
 
@@ -311,16 +311,6 @@ def synthesize(context: dict) -> AnalysisOutput:
 def synthesize_general(contexts: list[dict], query: str) -> GeneralAnalysisOutput:
     """
     Run cross-portfolio synthesis for general or comparative questions.
-
-    Takes intelligence briefs from multiple tickers and answers the user's
-    question by synthesizing signals across the whole portfolio.
-
-    Args:
-        contexts: List of unified context dicts, one per ticker.
-        query:    The original user question.
-
-    Returns:
-        GeneralAnalysisOutput: Validated comparative analysis + knowledge graph.
     """
     formatted_context = _format_multi_context(contexts, query)
 
@@ -341,50 +331,4 @@ def synthesize_general(contexts: list[dict], query: str) -> GeneralAnalysisOutpu
     result = response.choices[0].message.parsed
 
     print(f"[Synthesizer] ✅ Cross-portfolio analysis complete.")
-    print(f"  Query Type  : {result.query_type.value}")
-    print(f"  Top Ticker  : {result.narrative.top_ticker or 'N/A'}")
-    print(f"  Insights    : {len(result.narrative.ticker_insights)} tickers")
-    print(f"  Graph Nodes : {len(result.knowledge_graph.nodes)}")
-    print(f"  Graph Edges : {len(result.knowledge_graph.edges)}")
-
     return result
-
-
-# ── Dev / Test ────────────────────────────────────────────────────────────────
-
-if __name__ == "__main__":
-    import asyncio
-    import json
-    from retrieval.workflow import retrieve_all, run_cross_portfolio_retrieval
-
-    print("\n" + "=" * 60)
-    print("  [TEST A] Single-stock synthesis")
-    print("=" * 60)
-
-    TEST_TICKER = "GME"
-    TEST_QUERY  = "Should I buy GME stock right now?"
-
-    context = asyncio.run(retrieve_all(TEST_TICKER, TEST_QUERY))
-    output  = synthesize(context)
-
-    n = output.narrative
-    print(f"\n📋 SUMMARY\n  {n.summary}")
-    print(f"\n📱 REDDIT BUZZ\n  {n.reddit_buzz_signal}")
-    print(f"\n⚠️  CONTRADICTIONS\n  {n.contradictions}")
-    print(f"\n🎯 CONCLUSION [Risk: {n.risk_level.value}]\n  {n.conclusion}")
-
-    print("\n" + "=" * 60)
-    print("  [TEST B] Cross-portfolio synthesis")
-    print("=" * 60)
-
-    GENERAL_QUERY = "Which stocks are trending on Reddit right now?"
-    contexts = asyncio.run(run_cross_portfolio_retrieval(GENERAL_QUERY))
-    general_output = synthesize_general(contexts, GENERAL_QUERY)
-
-    g = general_output.narrative
-    print(f"\n💬 ANSWER\n  {g.answer}")
-    print(f"\n🏆 TOP TICKER\n  {g.top_ticker}")
-    print(f"\n🎯 CONCLUSION\n  {g.conclusion}")
-    print(f"\n📊 TICKER INSIGHTS:")
-    for insight in g.ticker_insights:
-        print(f"  [{insight.ticker}] {insight.key_signal} (relevance: {insight.relevance_score:.2f})")

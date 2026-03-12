@@ -3,23 +3,10 @@ api/ingest.py
 -------------
 POST /api/ingest — triggers a clean re-ingestion of all data layers.
 
-This endpoint allows judges and users to:
-  - Re-build the entire vector database from scratch with one API call
-  - Verify the ingestion pipeline works without needing terminal access
-  - Reset the knowledge base if collections become corrupted
-
-What it does:
-  1. Drops all ChromaDB collections (layer_news, layer_social,
-     layer_insider, layer_reddit_buzz)
-  2. Re-runs the full ingestion pipeline (all layers)
-  3. Returns a summary of how many documents were ingested per layer
-
-Security note:
-  In a production system this endpoint would be protected by an API key
-  or admin role. For the hackathon it is left open for ease of judging.
-
-GET /api/ingest/status — returns the current document counts per collection
-  without triggering re-ingestion. Useful for verifying the DB is populated.
+Layer 3 change:
+  get_insider_collection() → get_sec_collection()
+  The status endpoint now reports SEC filing chunk counts instead of
+  insider trade record counts.
 """
 
 from fastapi import APIRouter, HTTPException
@@ -29,7 +16,7 @@ from retrieval.chroma_client import (
     reset_all_collections,
     get_news_collection,
     get_social_collection,
-    get_insider_collection,
+    get_sec_collection,
     get_reddit_buzz_collection,
 )
 from ingestion.run_ingestion import run_all_ingestion
@@ -63,12 +50,9 @@ async def ingest():
     """
     Drop all collections and re-run the full ingestion pipeline.
 
-    This will:
-      1. Delete all existing vectors from ChromaDB
-      2. Re-embed and re-index all documents across all layers
-      3. Return document counts per layer on completion
-
-    Note: This operation takes 15-30 seconds due to OpenAI embedding calls.
+    Note: SEC EDGAR fetching adds ~30-60 seconds compared to the old
+    static insider JSON ingestion. This is expected — we're fetching
+    real regulatory documents from SEC servers.
     """
     try:
         reset_all_collections()
@@ -99,18 +83,18 @@ async def ingest_status():
     Does NOT trigger re-ingestion — read-only status check.
     """
     try:
-        news_count         = get_news_collection().count()
-        social_count       = get_social_collection().count()
-        insider_count      = get_insider_collection().count()
-        reddit_buzz_count  = get_reddit_buzz_collection().count()
-        total              = news_count + social_count + insider_count + reddit_buzz_count
+        news_count        = get_news_collection().count()
+        social_count      = get_social_collection().count()
+        sec_count         = get_sec_collection().count()
+        reddit_buzz_count = get_reddit_buzz_collection().count()
+        total             = news_count + social_count + sec_count + reddit_buzz_count
 
         return StatusResponse(
             status="online",
             counts={
                 "news"        : news_count,
                 "social"      : social_count,
-                "insider"     : insider_count,
+                "sec_filings" : sec_count,
                 "reddit_buzz" : reddit_buzz_count,
             },
             total=total,

@@ -6,6 +6,10 @@ and the retrieval workflow (read).
 
 Returns one ChromaDB Collection object per data layer.
 Collections are created with cosine similarity — optimal for text embeddings.
+
+Layer 3 change:
+  get_insider_collection() → get_sec_collection()
+  COLLECTION_INSIDER       → COLLECTION_SEC
 """
 
 from __future__ import annotations
@@ -18,7 +22,7 @@ from core.config import (
     CHROMA_PORT,
     COLLECTION_NEWS,
     COLLECTION_SOCIAL,
-    COLLECTION_INSIDER,
+    COLLECTION_SEC,
     COLLECTION_REDDIT_BUZZ,
 )
 
@@ -57,8 +61,9 @@ def get_social_collection() -> chromadb.Collection:
     return get_collection(COLLECTION_SOCIAL)
 
 
-def get_insider_collection() -> chromadb.Collection:
-    return get_collection(COLLECTION_INSIDER)
+def get_sec_collection() -> chromadb.Collection:
+    """Layer 3 — SEC EDGAR filings (10-K, 10-Q, 8-K)."""
+    return get_collection(COLLECTION_SEC)
 
 
 def get_reddit_buzz_collection() -> chromadb.Collection:
@@ -72,9 +77,9 @@ def reset_all_collections() -> None:
     Used by the POST /ingest endpoint to allow a clean re-ingestion.
     """
     client = get_client()
-    for name in [COLLECTION_NEWS, COLLECTION_SOCIAL, COLLECTION_INSIDER, COLLECTION_REDDIT_BUZZ]:
+    for name in [COLLECTION_NEWS, COLLECTION_SOCIAL, COLLECTION_SEC, COLLECTION_REDDIT_BUZZ]:
         try:
             client.delete_collection(name)
         except Exception:
-            pass  # Collection didn't exist yet — safe to ignore
+            pass 
     print("All collections reset.")

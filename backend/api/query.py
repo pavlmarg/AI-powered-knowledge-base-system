@@ -303,7 +303,7 @@ async def query(request: QueryRequest):
             retrieved_docs  = {
                 "news"        : context["news"],
                 "social"      : context["social"],
-                "insider"     : context["insider"],
+                "sec_filings" : context["sec_filings"],
                 "reddit_buzz" : context.get("reddit_buzz", []),
             },
         )
