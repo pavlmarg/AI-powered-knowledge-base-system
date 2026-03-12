@@ -1,5 +1,5 @@
 # ── Core API framework ────────────────────────────────────────────────────────
-fastapi==0.115.6
+fastapi==0.115.9
 uvicorn[standard]==0.32.1
 
 # ── OpenAI — embeddings + synthesis ──────────────────────────────────────────

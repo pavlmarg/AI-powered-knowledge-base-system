@@ -19,8 +19,8 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from api.query import router as query_router
 from api.ingest import router as ingest_router
-
-from api.query import lifespan
+from retrieval.workflow import seed_on_startup
+# from api.query import lifespan
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -36,6 +36,8 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         print(f"❌ ChromaDB connection failed: {e}")
         print("   Make sure ChromaDB is running on the configured host/port.")
+
+    await seed_on_startup()
     yield
 
 
