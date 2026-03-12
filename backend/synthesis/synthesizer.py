@@ -25,6 +25,7 @@ Rather than only:
 from openai import OpenAI
 from core.config import OPENAI_API_KEY, SYNTHESIS_MODEL
 from synthesis.schemas import AnalysisOutput, GeneralAnalysisOutput, RiskScore
+from memory.session_store import format_history_for_prompt
 
 _client = OpenAI(api_key=OPENAI_API_KEY)
 
@@ -327,23 +328,34 @@ def _format_multi_context(contexts: list[dict], query: str) -> str:
 
 # ── Synthesis functions ───────────────────────────────────────────────────────
 
-def synthesize(context: dict) -> AnalysisOutput:
+def synthesize(context: dict, history: list[dict] = []) -> AnalysisOutput:
     """
     Run single-stock synthesis with Chain-of-Thought reasoning.
 
     Uses gpt-4.1 with Structured Outputs to guarantee the response
     exactly matches the AnalysisOutput Pydantic schema.
+
+    Args:
+        context : Unified context dict from retrieve_all()
+        history : Conversation history from session_store (empty = stateless)
     """
+    history_block     = format_history_for_prompt(history)
     formatted_context = _format_context(context)
 
+    # Prepend conversation history to the intelligence brief
+    # so the model can reference previous turns for follow-up questions
+    full_user_content = history_block + formatted_context
+
     print(f"\n[Synthesizer] Single-stock synthesis for {context['ticker']}...")
+    if history:
+        print(f"[Synthesizer] 📋 With {len(history)//2} turn(s) of conversation history")
     print(f"[Synthesizer] Calling {SYNTHESIS_MODEL}...")
 
     response = _client.beta.chat.completions.parse(
         model=SYNTHESIS_MODEL,
         messages=[
             {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user",   "content": formatted_context},
+            {"role": "user",   "content": full_user_content},
         ],
         response_format=AnalysisOutput,
         temperature=0.2,
@@ -359,21 +371,30 @@ def synthesize(context: dict) -> AnalysisOutput:
     return result
 
 
-def synthesize_general(contexts: list[dict], query: str) -> GeneralAnalysisOutput:
+def synthesize_general(contexts: list[dict], query: str, history: list[dict] = []) -> GeneralAnalysisOutput:
     """
     Run cross-portfolio synthesis for general or comparative questions.
+
+    Args:
+        contexts : List of unified context dicts, one per ticker
+        query    : The user's original question
+        history  : Conversation history from session_store (empty = stateless)
     """
+    history_block     = format_history_for_prompt(history)
     formatted_context = _format_multi_context(contexts, query)
+    full_user_content = history_block + formatted_context
 
     tickers_covered = [c["ticker"] for c in contexts]
     print(f"\n[Synthesizer] Cross-portfolio synthesis across {tickers_covered}...")
+    if history:
+        print(f"[Synthesizer] 📋 With {len(history)//2} turn(s) of conversation history")
     print(f"[Synthesizer] Calling {SYNTHESIS_MODEL}...")
 
     response = _client.beta.chat.completions.parse(
         model=SYNTHESIS_MODEL,
         messages=[
             {"role": "system", "content": GENERAL_SYSTEM_PROMPT},
-            {"role": "user",   "content": formatted_context},
+            {"role": "user",   "content": full_user_content},
         ],
         response_format=GeneralAnalysisOutput,
         temperature=0.2,

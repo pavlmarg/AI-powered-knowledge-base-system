@@ -67,6 +67,7 @@ class QueryType(str, Enum):
     SINGLE_STOCK    = "single_stock"      # e.g. "Should I buy GME?"
     CROSS_PORTFOLIO = "cross_portfolio"   # e.g. "Which stock has the most bearish insiders?"
     GENERAL         = "general"           # e.g. "What is insider trading?"
+    OUT_OF_SCOPE    = "out_of_scope"      # e.g. "Is life beautiful?" — not a financial question
 
 
 # ── Knowledge Graph Models ────────────────────────────────────────────────────
