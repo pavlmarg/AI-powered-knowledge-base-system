@@ -5,13 +5,14 @@ Central configuration for the Financial RAG Engine.
 All environment variables and shared constants are loaded here.
 Every other module imports from this file — never from os.environ directly.
 
-Ticker architecture change:
-  Previously: KNOWN_TICKERS was a fixed whitelist — only these 10 tickers
-              were accepted and pre-ingested from static JSON files.
+Layer 3 architecture change:
+  Previously: INSIDER_FILE pointed to a static layer-3-insider.json with
+              50 hand-crafted fake insider trade records.
 
-  Now:        SEED_TICKERS is the default watchlist ingested on startup.
-              The system accepts ANY valid stock ticker beyond this list.
-              New tickers are auto-ingested on first query (on-demand).
+  Now:        Layer 3 is replaced by live SEC EDGAR filings (10-K, 10-Q, 8-K).
+              SEC_CIK_MAP maps each seed ticker to its official SEC CIK number.
+              The SEC EDGAR API is free and requires no API key.
+              TTL is set to 30 days — filings don't change frequently.
 """
 
 import os
@@ -36,14 +37,14 @@ CHROMA_PORT: int = int(os.getenv("CHROMA_PORT", "8000"))
 # Collection names — one per data layer
 COLLECTION_NEWS: str        = "layer_news"
 COLLECTION_SOCIAL: str      = "layer_social"
-COLLECTION_INSIDER: str     = "layer_insider"
-COLLECTION_REDDIT_BUZZ: str = "layer_reddit_buzz"   # Layer 5 — ApeWisdom Reddit buzz
+COLLECTION_SEC: str         = "layer_sec"          # Layer 3 — SEC EDGAR filings (replaces layer_insider)
+COLLECTION_REDDIT_BUZZ: str = "layer_reddit_buzz"  # Layer 5 — ApeWisdom Reddit buzz
 
-# ── Data paths (Layer 2 + 3 still use static JSON) ───────────────────────────
-DATA_DIR: str     = os.path.join(os.path.dirname(__file__), "..", "..", "data")
-SOCIAL_FILE: str  = os.path.join(DATA_DIR, "layer-2-social.json")
-INSIDER_FILE: str = os.path.join(DATA_DIR, "layer-3-insider.json")
-# NOTE: NEWS_FILE removed — Layer 1 now fetches live from Finnhub.
+# ── Data paths ────────────────────────────────────────────────────────────────
+DATA_DIR: str    = os.path.join(os.path.dirname(__file__), "..", "..", "data")
+SOCIAL_FILE: str = os.path.join(DATA_DIR, "layer-2-social.json")
+# NOTE: INSIDER_FILE removed — Layer 3 now fetches live from SEC EDGAR.
+# NOTE: NEWS_FILE removed   — Layer 1 now fetches live from Finnhub.
 
 # ── Seed tickers — ingested automatically on startup ─────────────────────────
 # These are the default watchlist the system always has data for.
@@ -53,24 +54,37 @@ SEED_TICKERS: set = {
     "NVDA", "PFE", "PLTR", "TSLA", "XOM"
 }
 
+# ── SEC EDGAR — Ticker → CIK mapping ─────────────────────────────────────────
+
+SEC_CIK_MAP: dict = {
+    "AAPL": "0000320193",
+    "BA":   "0000012927",
+    "GME":  "0001326380",
+    "JPM":  "0000019617",
+    "NEE":  "0000753308",
+    "NVDA": "0001045810",
+    "PFE":  "0000078003",
+    "PLTR": "0001321655",
+    "TSLA": "0001318605",
+    "XOM":  "0000034088",
+}
+
+# Filing types to fetch — ordered by information richness
+SEC_FILING_TYPES: list = ["10-K", "10-Q", "8-K"]
+
+# How many filings to fetch per type per ticker (keeps context window manageable)
+SEC_FILINGS_PER_TYPE: int = 2
+
 # ── Cache TTL ─────────────────────────────────────────────────────────────────
-# If the newest doc for a ticker is older than this, re-fetch from the source.
-NEWS_CACHE_TTL_DAYS:        int = 7   # Re-fetch Finnhub news after 7 days
-REDDIT_BUZZ_CACHE_TTL_DAYS: int = 1   # Re-fetch ApeWisdom Reddit buzz after 1 day
+NEWS_CACHE_TTL_DAYS:    int = 3    
+REDDIT_BUZZ_CACHE_TTL_DAYS: int = 1   
+SEC_CACHE_TTL_DAYS:     int = 30   
 
 # ── Finnhub news fetch window ─────────────────────────────────────────────────
-# How many calendar days back to pull news articles per ticker.
-NEWS_FETCH_DAYS: int = 30
+NEWS_FETCH_DAYS: int = int(os.getenv("NEWS_FETCH_DAYS", "30"))
 
-# ── ApeWisdom (Layer 5) ───────────────────────────────────────────────────────
-# Free public Reddit sentiment API — no API key or registration required.
-# Aggregates mentions from r/wallstreetbets, r/stocks, r/investing and more.
-# Paginated at 100 results/page (~8 pages covers all ~800 tracked tickers).
-# Base URL — ingest_reddit_buzz.py appends /page/{n} for pagination.
+# ── Twitter / Social engagement weights ──────────────────────────────────────
+TWITTER_WEIGHTS: dict = {"likes": 1.0, "retweets": 2.0, "views": 0.1}
+REDDIT_WEIGHTS:  dict = {"upvotes": 1.0, "comments": 1.5}
+
 APEWISDOM_URL: str = "https://apewisdom.io/api/v1.0/filter/all-stocks"
-
-# ── Engagement score weights (Layer 2 normalisation) ─────────────────────────
-# Twitter: likes * 1  +  retweets * 3  +  views * 0.01
-# Reddit:  upvotes * 1  +  comments * 2
-TWITTER_WEIGHTS: dict = {"likes": 1, "retweets": 3, "views": 0.01}
-REDDIT_WEIGHTS: dict  = {"upvotes": 1, "comments": 2}

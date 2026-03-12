@@ -4,14 +4,12 @@ synthesis/schemas.py
 Pydantic models that define the guaranteed output structure of the
 synthesis engine.
 
-Why this matters:
-  Without strict schemas, gpt-4.1 might return JSON with missing keys,
-  wrong field names, or inconsistent structure — which would crash the
-  frontend's React Flow knowledge graph renderer.
+Layer 3 change:
+  AnalysisNarrative.insider_activity → AnalysisNarrative.sec_filings_analysis
 
-  By using OpenAI's native Structured Outputs (.parse() method) with
-  these Pydantic models, we get a 100% guarantee that every response
-  conforms exactly to this schema. No validation errors, no crashes.
+  The new field carries a richer analysis: instead of summarising a few
+  insider buy/sell transactions, the model now synthesises official SEC
+  language from 10-K risk factors, 10-Q quarterly results, and 8-K events.
 
 Output structures — two paths:
 
@@ -19,20 +17,20 @@ Output structures — two paths:
   ─────────────────────────────────────────────────
   Part 1: AnalysisNarrative — structured CoT breakdown:
     - summary, news_analysis, social_sentiment, reddit_buzz_signal,
-      insider_activity, price_context, contradictions, conclusion, risk_level
+      sec_filings_analysis, price_context, contradictions, conclusion, risk_level
 
   Part 2: KnowledgeGraph — React Flow compatible:
-    - nodes : entities (Company, Person, Sentiment, Event, Price)
+    - nodes : entities (Company, Person, Sentiment, Event, Price, Filing)
     - edges : relationships between entities
 
   Path B: GeneralAnalysisOutput  (cross-portfolio / general questions)
   ──────────────────────────────────────────────────────────────────────
   Used when no specific ticker is identified. Returns:
-    - answer        : direct response to the question
-    - methodology   : how the answer was derived
-    - ticker_insights : per-ticker mini-summaries relevant to the question
-    - top_ticker    : the most relevant ticker if one stands out
-    - knowledge_graph : a comparative graph across multiple companies
+    - answer         : direct response to the question
+    - methodology    : how the answer was derived
+    - ticker_insights: per-ticker mini-summaries relevant to the question
+    - top_ticker     : the most relevant ticker if one stands out
+    - knowledge_graph: a comparative graph across multiple companies
 """
 
 from pydantic import BaseModel, Field
@@ -62,6 +60,7 @@ class NodeType(str, Enum):
     SENTIMENT = "Sentiment"
     EVENT     = "Event"
     PRICE     = "Price"
+    FILING    = "Filing"   # New node type for SEC filings
 
 
 class QueryType(str, Enum):
@@ -79,7 +78,7 @@ class GraphNode(BaseModel):
     """
     id    : str = Field(
         ...,
-        description="Unique identifier. Use the entity name e.g. 'GME', 'CEO_Ryan_Cohen'."
+        description="Unique identifier. Use the entity name e.g. 'GME', 'CEO_Ryan_Cohen', '10K_Risk'."
     )
     label : str = Field(
         ...,
@@ -87,11 +86,11 @@ class GraphNode(BaseModel):
     )
     type  : NodeType = Field(
         ...,
-        description="Category of the node: Company, Person, Sentiment, Event, or Price."
+        description="Category of the node: Company, Person, Sentiment, Event, Price, or Filing."
     )
     detail: str = Field(
         ...,
-        description="One sentence describing this entity's relevance e.g. 'CEO sold 5.2M shares'."
+        description="One sentence describing this entity's relevance e.g. '10-K warns of supply chain risk'."
     )
 
 
@@ -102,7 +101,7 @@ class GraphEdge(BaseModel):
     """
     id    : str = Field(
         ...,
-        description="Unique identifier for this edge e.g. 'edge_ceo_gme'."
+        description="Unique identifier for this edge e.g. 'edge_10k_gme'."
     )
     source: str = Field(
         ...,
@@ -114,7 +113,7 @@ class GraphEdge(BaseModel):
     )
     label : str = Field(
         ...,
-        description="Relationship label on the edge e.g. 'SOLD', 'BULLISH_ON', 'REPORTS'."
+        description="Relationship label on the edge e.g. 'DISCLOSES_RISK', 'REPORTS_REVENUE', 'WARNS_OF'."
     )
 
 
@@ -122,7 +121,7 @@ class KnowledgeGraph(BaseModel):
     """Complete knowledge graph with nodes and edges."""
     nodes: List[GraphNode] = Field(
         ...,
-        description="List of entity nodes. Must include the company, key people, sentiment, and price."
+        description="List of entity nodes. Must include the company, key SEC filing nodes, sentiment, and price."
     )
     edges: List[GraphEdge] = Field(
         ...,
@@ -139,7 +138,7 @@ class AnalysisNarrative(BaseModel):
     """
     summary: str = Field(
         ...,
-        description="One sentence verdict on the stock situation e.g. 'GME shows critical insider-retail divergence with high risk.'"
+        description="One sentence verdict on the stock situation e.g. 'TSLA's 10-K warns of margin pressure while Reddit sentiment is strongly bullish — a key contradiction.'"
     )
     news_analysis: str = Field(
         ...,
@@ -159,13 +158,15 @@ class AnalysisNarrative(BaseModel):
             "If no Reddit buzz data is available, explicitly state: 'No Reddit buzz data available for this ticker.'"
         )
     )
-    sentiment_label: SentimentLabel = Field(
+    sec_filings_analysis: str = Field(
         ...,
-        description="Overall social sentiment classification combining social posts AND Reddit buzz: BULLISH, BEARISH, MIXED, or NEUTRAL."
-    )
-    insider_activity: str = Field(
-        ...,
-        description="2-3 sentence analysis of insider trading patterns. Note who is buying or selling and the scale."
+        description=(
+            "3-4 sentence analysis of what the SEC filings reveal. "
+            "Identify the filing type (10-K / 10-Q / 8-K) and date. "
+            "Quote or closely paraphrase the most significant risk factor or management statement. "
+            "Note any material events from 8-K filings (earnings, M&A, leadership changes). "
+            "If no SEC filings are available, state that explicitly."
+        )
     )
     price_context: str = Field(
         ...,
@@ -174,14 +175,16 @@ class AnalysisNarrative(BaseModel):
     contradictions: str = Field(
         ...,
         description=(
-            "The most important conflict between signals e.g. insiders selling while Reddit buzz is RISING and retail is bullish. "
-            "Always consider Reddit momentum vs news sentiment as a potential contradiction. "
+            "The most important conflict between signals — especially between SEC official language "
+            "and retail/social sentiment. "
+            "e.g. '10-K warns of severe competition and margin compression, yet Reddit is RISING with bullish posts.' "
+            "Also consider: SEC risk factors vs news, 8-K material events vs social sentiment. "
             "This is the key insight."
         )
     )
     conclusion: str = Field(
         ...,
-        description="2-3 sentence final assessment synthesizing all signals including Reddit community momentum into a coherent view."
+        description="2-3 sentence final assessment synthesizing all signals including SEC filings into a coherent view."
     )
     risk_level: RiskLevel = Field(
         ...,
@@ -214,7 +217,7 @@ class TickerInsight(BaseModel):
     summary         : str            = Field(..., description="1-2 sentence insight about this ticker relevant to the question.")
     sentiment_label : SentimentLabel = Field(..., description="Overall sentiment for this ticker combining all available signals.")
     risk_level      : RiskLevel      = Field(..., description="Risk level for this ticker.")
-    key_signal      : str            = Field(..., description="The single most important signal for this ticker e.g. 'CEO sold 5M shares' or 'Rank #2 on Reddit, RISING'.")
+    key_signal      : str            = Field(..., description="The single most important signal for this ticker — can now reference SEC filings e.g. '10-K discloses $2B debt refinancing risk' or 'CEO sold 5M shares'.")
 
 
 class GeneralAnalysisNarrative(BaseModel):
