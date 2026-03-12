@@ -38,6 +38,9 @@ from retrieval.retriever import retrieve_news, retrieve_social, retrieve_insider
 from retrieval.finnhub_tool import get_live_price
 from ingestion.ingest_news import ingest_news_if_stale
 from ingestion.ingest_reddit_buzz import ingest_reddit_buzz_if_stale, ingest_reddit_buzz
+from ingestion.ingest_social import ingest_social
+from ingestion.ingest_insider import ingest_insider
+from retrieval.chroma_client import get_social_collection, get_insider_collection
 from core.config import SEED_TICKERS
 
 
@@ -45,20 +48,23 @@ from core.config import SEED_TICKERS
 
 async def seed_on_startup() -> None:
     """
-    Ensure all SEED_TICKERS have fresh news + Reddit buzz in ChromaDB.
+    Ensure all SEED_TICKERS have fresh data across all layers in ChromaDB.
 
-    Called from FastAPI's startup event. Runs ingestion for each seed
-    ticker in parallel — only fetches from remote APIs if cache is stale.
-    On a warm restart this completes in milliseconds (all cache hits).
-    On a cold start it fetches and embeds data for all 10 tickers.
+    Called from FastAPI's startup event.
 
-    Note: Reddit buzz is seeded via a single batch call (one ApeWisdom
-    walk for all 10 tickers) rather than 10 individual calls.
+    Layer 1 (News)       — re-ingested if cache is stale (TTL: 7 days)
+    Layer 2 (Social)     — ingested once on cold start; skipped on warm restart
+    Layer 3 (Insider)    — ingested once on cold start; skipped on warm restart
+    Layer 5 (Reddit Buzz)— re-ingested if cache is stale (TTL: 1 day)
+
+    Layers 2 & 3 use static JSON files — no TTL needed. The empty-collection
+    check guarantees they are loaded exactly once and never re-embedded
+    unnecessarily on subsequent restarts.
     """
     print(f"\n[Startup] Seeding {len(SEED_TICKERS)} tickers: {sorted(SEED_TICKERS)}")
     loop = asyncio.get_event_loop()
 
-    # News: parallel per ticker (each is an independent Finnhub call)
+    # Layer 1 — News: parallel per ticker (each is an independent Finnhub call)
     async def _seed_news(ticker: str) -> None:
         count = await loop.run_in_executor(None, ingest_news_if_stale, ticker)
         if count > 0:
@@ -68,7 +74,23 @@ async def seed_on_startup() -> None:
 
     await asyncio.gather(*[_seed_news(t) for t in sorted(SEED_TICKERS)])
 
-    # Reddit buzz: one batch call covers all 10 tickers in a single ApeWisdom walk
+    # Layer 2 — Social: load from static JSON only if collection is empty
+    social_count = get_social_collection().count()
+    if social_count == 0:
+        count = await loop.run_in_executor(None, ingest_social)
+        print(f"[Startup] ✅ Social — ingested {count} posts")
+    else:
+        print(f"[Startup] ✅ Social — cache already populated ({social_count} posts)")
+
+    # Layer 3 — Insider: load from static JSON only if collection is empty
+    insider_count = get_insider_collection().count()
+    if insider_count == 0:
+        count = await loop.run_in_executor(None, ingest_insider)
+        print(f"[Startup] ✅ Insider — ingested {count} trades")
+    else:
+        print(f"[Startup] ✅ Insider — cache already populated ({insider_count} trades)")
+
+    # Layer 5 — Reddit buzz: one batch call covers all 10 tickers in a single ApeWisdom walk
     buzz_count = await loop.run_in_executor(None, ingest_reddit_buzz, list(SEED_TICKERS))
     if buzz_count > 0:
         print(f"[Startup] ✅ Reddit buzz — {buzz_count} ticker(s) ingested")
