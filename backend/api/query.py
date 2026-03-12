@@ -199,30 +199,30 @@ Rules:
 # ── Query Classifier ──────────────────────────────────────────────────────────
 
 def _classify_query(question: str, ticker: Optional[str]) -> QueryType:
-    """
-    Determine the routing path for this query.
-
-    If a ticker was resolved → always SINGLE_STOCK.
-    Otherwise use LLM to classify as CROSS_PORTFOLIO or GENERAL.
-    """
     if ticker:
         return QueryType.SINGLE_STOCK
 
-    prompt = f"""Classify this financial question:
+    prompt = f"""You are a query classifier for a financial analysis system.
 
 Question: "{question}"
 
-CROSS_PORTFOLIO — needs to compare or rank specific stocks
-  Examples: "Which stock has the most insider selling?",
-            "Which companies are most bullish on Reddit?",
-            "Are there stocks where insiders disagree with retail sentiment?"
+Classify into exactly ONE category:
 
-GENERAL — broad financial knowledge question, no specific stock comparison needed
-  Examples: "What is insider trading?",
-            "What should I invest in?",
-            "Explain what a short squeeze is"
+CROSS_PORTFOLIO — compares or ranks specific stocks
+  Examples: "Which stock has the most insider selling?"
+            "Which companies are most bullish on Reddit?"
 
-Return ONLY: CROSS_PORTFOLIO or GENERAL"""
+GENERAL — broad financial knowledge, no specific stock needed
+  Examples: "What is insider trading?"
+            "What should I invest in?"
+
+OUT_OF_SCOPE — NOT a financial question at all
+  Examples: "Is life beautiful?"
+            "What's the weather today?"
+            "Tell me a joke"
+            "Hello, how are you?"
+
+Return ONLY one word: CROSS_PORTFOLIO, GENERAL, or OUT_OF_SCOPE"""
 
     try:
         response = _client.chat.completions.create(
@@ -234,6 +234,8 @@ Return ONLY: CROSS_PORTFOLIO or GENERAL"""
         result = response.choices[0].message.content.strip().upper()
         print(f"[Router] Query classified as: {result}")
 
+        if "OUT_OF_SCOPE" in result:
+            return QueryType.OUT_OF_SCOPE
         if "GENERAL" in result:
             return QueryType.GENERAL
         return QueryType.CROSS_PORTFOLIO
@@ -278,6 +280,19 @@ async def query(request: QueryRequest):
     print(f"[Router] Final route → type={query_type.value} ticker={ticker}")
 
     # ── Step 3 + 4: Retrieve + Synthesize ────────────────────────────────────
+    
+    # Path 0: Out of scope — return immediately, no retrieval needed
+    if query_type == QueryType.OUT_OF_SCOPE:
+        return QueryResponse(
+            query_type      = query_type.value,
+            ticker          = None,
+            narrative       = {
+                "message": "This doesn't appear to be a financial question. I'm specialised in stock market analysis — try asking about a specific company, market trends, or investment topics."
+            },
+            knowledge_graph = {"nodes": [], "edges": []},
+            price           = None,
+            retrieved_docs  = None,
+        )
 
     # Path A: Single-stock (any ticker, auto-ingests if new)
     if query_type == QueryType.SINGLE_STOCK:

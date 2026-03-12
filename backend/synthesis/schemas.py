@@ -129,6 +129,66 @@ class KnowledgeGraph(BaseModel):
     )
 
 
+
+
+# ── Risk Score Model ──────────────────────────────────────────────────────────
+
+class RiskScore(BaseModel):
+    """
+    A single unified Risk Percentage (0-100%) for the stock.
+
+    Designed to be shown directly in the UI as a risk gauge/meter.
+
+    Calculation logic (performed by the LLM):
+
+      Step 1 — Base risk from fundamentals:
+        LOW       → 15
+        MEDIUM    → 35
+        HIGH      → 60
+        VERY_HIGH → 80
+
+      Step 2 — Add contradiction bonuses (sources disagreeing = more risk):
+        +15  if SEC filings sentiment conflicts with social/Reddit sentiment
+             (official filings warn of problems retail investors are ignoring)
+        +10  if Reddit momentum conflicts with news sentiment
+             (e.g. Reddit RISING/BULLISH but news coverage is negative)
+        +10  if price movement conflicts with SEC fundamental signals
+             (price rising while filings warn of serious headwinds)
+        +5   if social sentiment conflicts with news sentiment
+
+      Step 3 — Clamp to [0, 100]
+
+    The key insight: contradictions between sources mean higher uncertainty,
+    and higher uncertainty = higher risk for any position taken.
+
+    risk_label maps the percentage to a human-readable label:
+      0-25   → "Low Risk"
+      26-50  → "Moderate Risk"
+      51-75  → "High Risk"
+      76-100 → "Very High Risk"
+    """
+    risk_percentage : int = Field(
+        ...,
+        ge=0, le=100,
+        description=(
+            "Overall risk score from 0 to 100. "
+            "Combines fundamental risk level with contradiction penalties. "
+            "Higher when sources disagree with each other."
+        )
+    )
+    risk_label : str = Field(
+        ...,
+        description="Human-readable label: 'Low Risk', 'Moderate Risk', 'High Risk', or 'Very High Risk'."
+    )
+    dominant_risk_factor : str = Field(
+        ...,
+        description=(
+            "One sentence naming the single biggest contributor to the risk score. "
+            "e.g. 'SEC 10-K warns of margin compression while Reddit sentiment is strongly bullish — "
+            "sources in maximum disagreement.' or 'All signals align bearish with high conviction.'"
+        )
+    )
+
 # ── Narrative Analysis Model (Single-Stock) ───────────────────────────────────
 
 class AnalysisNarrative(BaseModel):
@@ -190,6 +250,14 @@ class AnalysisNarrative(BaseModel):
         ...,
         description="Overall risk assessment: LOW, MEDIUM, HIGH, or VERY_HIGH."
     )
+    risk_percentage : int = Field(
+        ...,
+        ge=0, le=100,
+        description=(
+            "Overall risk percentage (0-100). Mirrors RiskScore.risk_percentage "
+            "for easy frontend access. Higher when sources contradict each other."
+        )
+    )
 
 
 # ── Single-Stock Final Output ─────────────────────────────────────────────────
@@ -197,11 +265,12 @@ class AnalysisNarrative(BaseModel):
 class AnalysisOutput(BaseModel):
     """
     The complete output of the synthesis engine for a single-stock query.
-    Contains both the narrative analysis and the knowledge graph.
+    Contains the narrative analysis, quantified scoring, and the knowledge graph.
     This is what the FastAPI endpoint returns to the frontend.
     """
     ticker          : str               = Field(..., description="The stock ticker analysed.")
     narrative       : AnalysisNarrative = Field(..., description="Structured CoT analysis.")
+    risk_score      : RiskScore          = Field(..., description="Unified risk percentage with contradiction-aware scoring.")
     knowledge_graph : KnowledgeGraph    = Field(..., description="React Flow compatible graph.")
 
 
@@ -217,6 +286,17 @@ class TickerInsight(BaseModel):
     summary         : str            = Field(..., description="1-2 sentence insight about this ticker relevant to the question.")
     sentiment_label : SentimentLabel = Field(..., description="Overall sentiment for this ticker combining all available signals.")
     risk_level      : RiskLevel      = Field(..., description="Risk level for this ticker.")
+    risk_percentage : int            = Field(
+        ...,
+        ge=0, le=100,
+        description=(
+            "Risk percentage for this specific ticker (0-100). "
+            "Use the same scoring logic as single-stock: "
+            "base from risk_level (LOW=15, MEDIUM=35, HIGH=60, VERY_HIGH=80) "
+            "plus contradiction bonuses (+15 SEC vs social, +10 Reddit vs news, "
+            "+10 price vs SEC, +5 social vs news). Clamp to [0, 100]."
+        )
+    )
     key_signal      : str            = Field(..., description="The single most important signal for this ticker — can now reference SEC filings e.g. '10-K discloses $2B debt refinancing risk' or 'CEO sold 5M shares'.")
 
 
@@ -243,6 +323,14 @@ class GeneralAnalysisNarrative(BaseModel):
     conclusion: str = Field(
         ...,
         description="2-3 sentence synthesized conclusion across all analysed data."
+    )
+    portfolio_risk_summary: str = Field(
+        ...,
+        description=(
+            "1-2 sentence summary of the overall risk picture across all tickers. "
+            "e.g. 'GME (87%) and PLTR (72%) carry the highest risk due to SEC-vs-Reddit contradictions. "
+            "JPM (32%) is the most stable with aligned signals across all sources.'"
+        )
     )
 
 

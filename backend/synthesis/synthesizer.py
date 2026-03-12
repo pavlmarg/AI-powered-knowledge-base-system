@@ -24,7 +24,7 @@ Rather than only:
 
 from openai import OpenAI
 from core.config import OPENAI_API_KEY, SYNTHESIS_MODEL
-from synthesis.schemas import AnalysisOutput, GeneralAnalysisOutput
+from synthesis.schemas import AnalysisOutput, GeneralAnalysisOutput, RiskScore
 
 _client = OpenAI(api_key=OPENAI_API_KEY)
 
@@ -72,6 +72,40 @@ REASONING APPROACH — follow this chain of thought strictly:
            - Management language is cautious/hedged while price is rising
   Step 7: What is your final synthesized assessment?
 
+RISK PERCENTAGE SCORING INSTRUCTIONS:
+  After completing the 7-step analysis, compute the RiskScore object.
+
+  Step 1 — Start with a base score from the fundamental risk level:
+    LOW       → 15
+    MEDIUM    → 35
+    HIGH      → 60
+    VERY_HIGH → 80
+
+  Step 2 — Add contradiction bonuses for each source disagreement:
+    +15  if SEC filings sentiment conflicts with social/Reddit sentiment
+         (official language warns of problems retail investors are ignoring)
+    +10  if Reddit momentum conflicts with news sentiment
+         (e.g. Reddit RISING/BULLISH while news coverage is predominantly negative)
+    +10  if price movement direction conflicts with SEC fundamental signals
+         (price rising while filings warn of serious headwinds — or falling while filings are positive)
+    +5   if social sentiment conflicts with news sentiment
+
+  Step 3 — Clamp final total to [0, 100].
+
+  Step 4 — Assign risk_label:
+    0-25   → "Low Risk"
+    26-50  → "Moderate Risk"
+    51-75  → "High Risk"
+    76-100 → "Very High Risk"
+
+  Step 5 — Write dominant_risk_factor: one sentence naming the biggest
+  contributor to the score, e.g.:
+    "SEC 10-K warns of margin compression while Reddit is strongly bullish — sources in maximum disagreement."
+    "All signals align bearish — no contradiction bonus but fundamentals are weak."
+    "Price is rising sharply while 10-Q discloses declining revenue — key divergence."
+
+  Also set narrative.risk_percentage to the same value for easy frontend access.
+
 KNOWLEDGE GRAPH INSTRUCTIONS:
   Always create Filing nodes for SEC documents when Layer 3 data is present.
   Use node type 'Filing' with labels like '10-K: Risk Factors' or '8-K: Earnings'.
@@ -114,7 +148,24 @@ REASONING APPROACH:
 
 Be specific — reference actual SEC filing content (risk factor language, 
 revenue figures from MD&A, 8-K event details) alongside Reddit ranks and 
-mention counts rather than generic statements."""
+mention counts rather than generic statements.
+
+RISK PERCENTAGE SCORING FOR EACH TICKER:
+  For every ticker in ticker_insights, compute risk_percentage using:
+
+  Step 1 — Base from risk_level:
+    LOW=15, MEDIUM=35, HIGH=60, VERY_HIGH=80
+
+  Step 2 — Add contradiction bonuses:
+    +15  if SEC filings conflict with social/Reddit sentiment
+    +10  if Reddit momentum conflicts with news sentiment
+    +10  if price movement conflicts with SEC signals
+    +5   if social sentiment conflicts with news sentiment
+
+  Step 3 — Clamp to [0, 100]
+
+  Also write portfolio_risk_summary: one or two sentences ranking the
+  tickers by risk_percentage and naming the highest-risk contradiction."""
 
 
 # ── Context Formatters ────────────────────────────────────────────────────────
