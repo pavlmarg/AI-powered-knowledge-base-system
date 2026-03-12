@@ -53,15 +53,15 @@ _client = OpenAI(api_key=OPENAI_API_KEY)
 
 # ── Startup event ─────────────────────────────────────────────────────────────
 
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    """
-    FastAPI lifespan hook — runs seed_on_startup() before first request.
-    Register this in main.py:  app = FastAPI(lifespan=lifespan)
-    """
-    await seed_on_startup()
-    yield
-    # (shutdown logic here if needed)
+# @asynccontextmanager
+# async def lifespan(app: FastAPI):
+#     """
+#     FastAPI lifespan hook — runs seed_on_startup() before first request.
+#     Register this in main.py:  app = FastAPI(lifespan=lifespan)
+#     """
+#     await seed_on_startup()
+#     yield
+#     # (shutdown logic here if needed)
 
 
 # ── Request / Response Models ─────────────────────────────────────────────────
