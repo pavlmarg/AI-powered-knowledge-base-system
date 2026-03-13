@@ -98,7 +98,7 @@ DEFAULT_EDGE_COLOR = "#BDC3C7"
 
 # ── Internal: build HTML ──────────────────────────────────────────────────────
 
-def _build_graph_html(nodes: list, edges: list, title: str) -> str:
+def _build_graph_html(nodes: list, edges: list, title: str, summary: str = "", risk_pct: int = 0, risk_label: str = "", contradiction: str = "") -> str:
     net = Network(
         height     = "100vh",
         width      = "100%",
@@ -204,19 +204,136 @@ def _build_graph_html(nodes: list, edges: list, title: str) -> str:
     </div>
     """
 
-    html = html.replace("<body>", f"<body>{title_banner}{legend_html}")
+    # ── Stats: count CONTRADICTS vs ALIGNS ───────────────────────────────────
+    n_contradicts = sum(1 for e in edges if (e.get("label","") if isinstance(e,dict) else e.label) == "CONTRADICTS")
+    n_aligns      = sum(1 for e in edges if (e.get("label","") if isinstance(e,dict) else e.label) in ("ALIGNS","ALIGNS_WITH"))
+    n_total       = len(edges)
+
+    # ── Risk meter color ──────────────────────────────────────────────────────
+    if risk_pct <= 25:
+        risk_color = "#27AE60"    # green
+    elif risk_pct <= 50:
+        risk_color = "#F39C12"    # amber
+    elif risk_pct <= 75:
+        risk_color = "#E67E22"    # orange
+    else:
+        risk_color = "#E74C3C"    # red
+
+    # ── Insight panel (top-right) ─────────────────────────────────────────────
+    insight_panel = ""
+    if summary or risk_pct or contradiction:
+        risk_block = ""
+        if risk_pct:
+            bar_width = risk_pct
+            risk_block = f"""
+            <div style="margin:10px 0 6px;">
+                <div style="display:flex;justify-content:space-between;margin-bottom:4px;">
+                    <span style="font-weight:bold;color:#ccc;">Risk Score</span>
+                    <span style="font-weight:bold;color:{risk_color};">{risk_pct}% — {risk_label}</span>
+                </div>
+                <div style="background:#333;border-radius:4px;height:10px;overflow:hidden;">
+                    <div style="width:{bar_width}%;background:{risk_color};height:100%;border-radius:4px;
+                                transition:width 1s ease;"></div>
+                </div>
+            </div>"""
+
+        contradiction_block = ""
+        if contradiction:
+            contradiction_block = f"""
+            <div style="margin-top:10px;padding:8px;background:rgba(231,76,60,0.15);
+                        border-left:3px solid #E74C3C;border-radius:0 4px 4px 0;">
+                <div style="font-size:10px;color:#E74C3C;font-weight:bold;margin-bottom:3px;">
+                    ⚠ KEY CONTRADICTION
+                </div>
+                <div style="font-size:11px;color:#ddd;line-height:1.4;">{contradiction[:200]}{"..." if len(contradiction)>200 else ""}</div>
+            </div>"""
+
+        insight_panel = f"""
+        <div style="
+            position:fixed; top:55px; right:20px;
+            width:300px;
+            background:rgba(26,26,46,0.95);
+            color:#ccc;
+            font-family:'Segoe UI',Arial,sans-serif;
+            font-size:12px;
+            padding:14px 16px;
+            border-radius:8px;
+            border:1px solid #4A90D9;
+            z-index:1000;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.4);
+        ">
+            <div style="font-weight:bold;color:#4A90D9;font-size:13px;margin-bottom:8px;">
+                📊 Analysis Summary
+            </div>
+            {"<div style='font-size:11px;color:#ddd;line-height:1.5;margin-bottom:8px;'>" + summary[:180] + ("..." if len(summary)>180 else "") + "</div>" if summary else ""}
+            {risk_block}
+            {contradiction_block}
+        </div>
+        """
+
+    # ── Stats bar (bottom-right) ──────────────────────────────────────────────
+    stats_bar = f"""
+    <div style="
+        position:fixed; bottom:20px; right:20px;
+        background:rgba(26,26,46,0.9); color:#ccc;
+        font-family:'Segoe UI',Arial,sans-serif; font-size:12px;
+        padding:12px 16px; border-radius:8px;
+        border:1px solid #333; z-index:1000;
+        display:flex; gap:20px; align-items:center;
+    ">
+        <div style="text-align:center;">
+            <div style="font-size:20px;font-weight:bold;color:#E74C3C;">{n_contradicts}</div>
+            <div style="font-size:10px;color:#aaa;">CONTRADICTS</div>
+        </div>
+        <div style="width:1px;height:30px;background:#444;"></div>
+        <div style="text-align:center;">
+            <div style="font-size:20px;font-weight:bold;color:#27AE60;">{n_aligns}</div>
+            <div style="font-size:10px;color:#aaa;">ALIGNS</div>
+        </div>
+        <div style="width:1px;height:30px;background:#444;"></div>
+        <div style="text-align:center;">
+            <div style="font-size:20px;font-weight:bold;color:#95A5A6;">{n_total}</div>
+            <div style="font-size:10px;color:#aaa;">TOTAL EDGES</div>
+        </div>
+    </div>
+    """
+
+    html = html.replace("<body>", f"<body>{title_banner}{legend_html}{insight_panel}{stats_bar}")
     return html
 
 
 # ── Public helper: called by api/query.py ────────────────────────────────────
 
-def store_graph(session_id: str, nodes: list, edges: list, title: str) -> None:
+def store_graph(
+    session_id   : str,
+    nodes        : list,
+    edges        : list,
+    title        : str,
+    summary      : str = "",
+    risk_pct     : int = 0,
+    risk_label   : str = "",
+    contradiction: str = "",
+) -> None:
     """
     Store the latest knowledge graph for a session.
     Called automatically by /api/query after every successful synthesis.
     Makes the graph available via GET /api/graph/view/{session_id}.
+
+    Optional metadata enriches the HTML page with:
+      - summary      : one-sentence verdict from the narrative
+      - risk_pct     : 0-100 risk percentage
+      - risk_label   : "Low Risk" / "Moderate Risk" / "High Risk" / "Very High Risk"
+      - contradiction: the key contradiction sentence from the narrative
     """
-    _graph_store[session_id] = {"nodes": nodes, "edges": edges, "title": title}
+    _graph_store[session_id] = {
+        "nodes"        : nodes,
+        "edges"        : edges,
+        "title"        : title,
+        "summary"      : summary,
+        "risk_pct"     : risk_pct,
+        "risk_label"   : risk_label,
+        "contradiction": contradiction,
+    }
 
 
 # ── Routes ────────────────────────────────────────────────────────────────────
@@ -267,9 +384,15 @@ async def view_graph(session_id: str):
                 "Run at least one /api/query with this session_id first."
             )
         )
-    return HTMLResponse(
-        content=_build_graph_html(graph["nodes"], graph["edges"], graph["title"])
-    )
+    return HTMLResponse(content=_build_graph_html(
+        nodes        = graph["nodes"],
+        edges        = graph["edges"],
+        title        = graph["title"],
+        summary      = graph.get("summary", ""),
+        risk_pct     = graph.get("risk_pct", 0),
+        risk_label   = graph.get("risk_label", ""),
+        contradiction= graph.get("contradiction", ""),
+    ))
 
 
 @router.get(

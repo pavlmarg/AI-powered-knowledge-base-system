@@ -1,7 +1,10 @@
 1) Το ticker resolution από ιστορικό — αν ο χρήστης γράψει 'είναι ασυνήθιστο αυτό;' χωρίς να αναφέρει εταιρεία, το σύστημα δεν κοιτάει το ιστορικό για να βρει ποια εταιρεία συζητάμε και ρουτάρει λάθος. Να το διορθώσουμε;
+den egine
 
-2) Api endpoints συγκεντρωμενα σε λιστα 
+2) Api endpoints συγκεντρωμενα σε λιστα - guide
 
-3)
+3)Graph UI egine 
 
-4) Graph UI
+4) deep research gia requirements.txt
+
+5) data -> json -> mapping
