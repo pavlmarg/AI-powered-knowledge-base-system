@@ -3,8 +3,6 @@ den egine
 
 2) Api endpoints συγκεντρωμενα σε λιστα - guide
 
-3)Graph UI egine 
-
-4) deep research gia requirements.txt
+4) deep research gia requirements.txt 
 
 5) data -> json -> mapping

@@ -16,3 +16,9 @@ finnhub-python==2.4.27
 
 # ── Environment variables ─────────────────────────────────────────────────────
 python-dotenv==1.0.1
+
+# HTTP requests for SEC EDGAR + ApeWisdom APIs  (used in ingestion layer) ─────────────────────────────────────────────────────────────
+requests==2.31.0
+
+# Knowledge graph visualization (used in retrieval layer for debugging/insights)
+pyvis>=0.3.2
