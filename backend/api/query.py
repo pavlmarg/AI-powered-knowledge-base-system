@@ -46,33 +46,20 @@ Response always includes:
 
 import re
 import uuid
-from contextlib import asynccontextmanager
 from typing import Optional
 
-from fastapi import APIRouter, FastAPI, HTTPException
+from fastapi import APIRouter, HTTPException 
 from pydantic import BaseModel, Field
 from openai import OpenAI
 
 from core.config import SEED_TICKERS, OPENAI_API_KEY, SYNTHESIS_MODEL
-from retrieval.workflow import retrieve_all, run_cross_portfolio_retrieval, seed_on_startup
+from retrieval.workflow import retrieve_all, run_cross_portfolio_retrieval 
 from synthesis.synthesizer import synthesize, synthesize_general
 from synthesis.schemas import QueryType
 from memory.session_store import get_history, append_turn, clear_session, session_count
 
 router  = APIRouter()
 _client = OpenAI(api_key=OPENAI_API_KEY)
-
-
-# ── Startup lifespan ──────────────────────────────────────────────────────────
-
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    """
-    FastAPI lifespan hook — seeds SEED_TICKERS on startup.
-    Register in main.py:  app = FastAPI(lifespan=lifespan)
-    """
-    await seed_on_startup()
-    yield
 
 
 # ── Request / Response Models ─────────────────────────────────────────────────
