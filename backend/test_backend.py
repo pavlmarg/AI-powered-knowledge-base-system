@@ -107,7 +107,7 @@ IMPORT_CHECKS = [
     ("ingest_news — live functions",        "ingestion.ingest_news",   ["ingest_news_for_ticker", "ingest_news_if_stale", "ingest_news"]),
     ("finnhub_tool — get_live_price",       "retrieval.finnhub_tool",  ["get_live_price"]),
     ("workflow — seed_on_startup",          "retrieval.workflow",      ["seed_on_startup", "retrieve_all", "run_cross_portfolio_retrieval"]),
-    ("query — router + lifespan",           "api.query",               ["router", "lifespan"]),
+    ("query — router + lifespan",           "api.query",               ["router"]),  # lifespan handled separately in main.py
 ]
 
 def run_import_checks() -> None:
