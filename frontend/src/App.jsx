@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
-const API_BASE = "http://localhost:8080/api";
+const API_BASE = "/api";
 
 const SEED_TICKERS = ["AAPL", "BA", "GME", "JPM", "NEE", "NVDA", "PFE", "PLTR", "TSLA", "XOM"];
 
