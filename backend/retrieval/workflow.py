@@ -28,6 +28,12 @@ Three entry points:
 Layer 3 change:
   ingest_insider / retrieve_insider → ingest_sec / retrieve_sec_filings
   The static JSON with 50 fake trades is replaced by live SEC EDGAR filings.
+
+Issue 2 fix:
+  Replaced all asyncio.get_event_loop().run_in_executor() calls with
+  asyncio.to_thread() — the modern Python 3.10+ idiomatic pattern.
+  get_event_loop() is deprecated inside coroutines and raises
+  DeprecationWarning in Python 3.12+.
 """
 
 import asyncio
@@ -54,13 +60,11 @@ async def seed_on_startup() -> None:
     Layer 3 (SEC filings) — re-ingested if cache is stale (TTL: 30 days)
     Layer 5 (Reddit Buzz) — re-ingested if cache is stale (TTL: 1 day)
     """
-    loop = asyncio.get_event_loop()
-
     # Layer 2 — Social: ingest once if collection is empty
     social_col = get_social_collection()
     if social_col.count() == 0:
         print("[Startup] Layer 2 (Social) — cold start, ingesting...")
-        await loop.run_in_executor(None, ingest_social)
+        await asyncio.to_thread(ingest_social)
     else:
         print(f"[Startup] Layer 2 (Social) — already loaded ({social_col.count()} docs)")
 
@@ -68,7 +72,7 @@ async def seed_on_startup() -> None:
     sec_col = get_sec_collection()
     if sec_col.count() == 0:
         print("[Startup] Layer 3 (SEC) — cold start, ingesting all seed tickers...")
-        await loop.run_in_executor(None, ingest_sec_for_ticker_all_seeds)
+        await asyncio.to_thread(ingest_sec_for_ticker_all_seeds)
     else:
         print(f"[Startup] Layer 3 (SEC) — already loaded ({sec_col.count()} chunks)")
 
@@ -98,8 +102,7 @@ async def _ensure_news_fresh(ticker: str) -> None:
     Before retrieval, check if news cache is stale and re-ingest if needed.
     This is what makes any new ticker work automatically on first query.
     """
-    loop  = asyncio.get_event_loop()
-    count = await loop.run_in_executor(None, ingest_news_if_stale, ticker)
+    count = await asyncio.to_thread(ingest_news_if_stale, ticker)
     if count > 0:
         print(f"[Workflow] 🔄 On-demand news ingestion: {count} new articles for {ticker}")
 
@@ -108,8 +111,7 @@ async def _ensure_reddit_buzz_fresh(ticker: str) -> None:
     """
     Before retrieval, check if Reddit buzz cache is stale and re-ingest if needed.
     """
-    loop  = asyncio.get_event_loop()
-    count = await loop.run_in_executor(None, ingest_reddit_buzz_if_stale, ticker)
+    count = await asyncio.to_thread(ingest_reddit_buzz_if_stale, ticker)
     if count > 0:
         print(f"[Workflow] 🔄 On-demand Reddit buzz ingestion for {ticker}")
 
@@ -119,8 +121,7 @@ async def _ensure_sec_fresh(ticker: str) -> None:
     Before retrieval, check if SEC filings cache is stale and re-ingest if needed.
     TTL is 30 days — filings don't change often, but we want to catch new 10-Qs.
     """
-    loop  = asyncio.get_event_loop()
-    count = await loop.run_in_executor(None, ingest_sec_if_stale, ticker)
+    count = await asyncio.to_thread(ingest_sec_if_stale, ticker)
     if count > 0:
         print(f"[Workflow] 🔄 On-demand SEC ingestion: {count} new chunks for {ticker}")
 
@@ -128,24 +129,19 @@ async def _ensure_sec_fresh(ticker: str) -> None:
 # ── Async retrieval wrappers ──────────────────────────────────────────────────
 
 async def _fetch_news(ticker: str, query: str) -> list[dict]:
-    loop = asyncio.get_event_loop()
-    return await loop.run_in_executor(None, retrieve_news, ticker, query)
+    return await asyncio.to_thread(retrieve_news, ticker, query)
 
 async def _fetch_social(ticker: str, query: str) -> list[dict]:
-    loop = asyncio.get_event_loop()
-    return await loop.run_in_executor(None, retrieve_social, ticker, query)
+    return await asyncio.to_thread(retrieve_social, ticker, query)
 
 async def _fetch_sec(ticker: str, query: str) -> list[dict]:
-    loop = asyncio.get_event_loop()
-    return await loop.run_in_executor(None, retrieve_sec_filings, ticker, query)
+    return await asyncio.to_thread(retrieve_sec_filings, ticker, query)
 
 async def _fetch_price(ticker: str) -> dict:
-    loop = asyncio.get_event_loop()
-    return await loop.run_in_executor(None, get_live_price, ticker)
+    return await asyncio.to_thread(get_live_price, ticker)
 
 async def _fetch_reddit_buzz(ticker: str, query: str) -> list[dict]:
-    loop = asyncio.get_event_loop()
-    return await loop.run_in_executor(None, retrieve_reddit_buzz, ticker, query)
+    return await asyncio.to_thread(retrieve_reddit_buzz, ticker, query)
 
 
 # ── Single-ticker retrieval ───────────────────────────────────────────────────
@@ -221,10 +217,10 @@ async def run_cross_portfolio_retrieval(query: str) -> list[dict]:
         for ticker in sorted(SEED_TICKERS)
     ])
 
-    total_news  = sum(len(c["news"])         for c in contexts)
-    total_social= sum(len(c["social"])       for c in contexts)
-    total_sec   = sum(len(c["sec_filings"])  for c in contexts)
-    total_reddit= sum(len(c["reddit_buzz"])  for c in contexts)
+    total_news   = sum(len(c["news"])         for c in contexts)
+    total_social = sum(len(c["social"])       for c in contexts)
+    total_sec    = sum(len(c["sec_filings"])  for c in contexts)
+    total_reddit = sum(len(c["reddit_buzz"])  for c in contexts)
 
     print(f"[Workflow] ✅ Cross-portfolio complete.")
     print(f"  Tickers     : {[c['ticker'] for c in contexts]}")
