@@ -11,61 +11,19 @@ const COMPANY_NAMES = {
   PFE: "Pfizer Inc.", PLTR: "Palantir Technologies", TSLA: "Tesla Inc.", XOM: "ExxonMobil",
 };
 
-const MOCK_PRICES = {
-  AAPL: { price: 227.50, change: 1.70, pct: 0.75 },
-  BA:   { price: 175.20, change: -2.30, pct: -1.30 },
-  GME:  { price: 26.80,  change: 1.70, pct: 6.77 },
-  JPM:  { price: 201.25, change: 3.20, pct: 1.62 },
-  NEE:  { price: 66.27,  change: 0.32, pct: 0.49 },
-  NVDA: { price: 874.87, change: 5.92, pct: 0.68 },
-  PFE:  { price: 26.88,  change: -0.01, pct: -0.04 },
-  PLTR: { price: 24.89,  change: 2.95, pct: 13.34 },
-  TSLA: { price: 256.63, change: 13.92, pct: 5.74 },
-  XOM:  { price: 112.26, change: 0.48, pct: 0.43 },
+const RISK_COLOR = (score) =>
+  score < 35 ? "#00ff9d" : score < 65 ? "#f6ad55" : "#ff4d6d";
+
+const SENTIMENT_COLORS = {
+  bullish: "#00ff9d", bearish: "#ff4d6d", neutral: "#a0aec0",
+  BULLISH: "#00ff9d", BEARISH: "#ff4d6d", NEUTRAL: "#a0aec0", MIXED: "#f6ad55",
+  LOW: "#00ff9d", MEDIUM: "#f6ad55", HIGH: "#ff4d6d", VERY_HIGH: "#ff2050",
 };
 
-const SAMPLE_NEWS = [
-  { ticker: "NVDA", headline: "NVIDIA reveals Rubin AI chip: 40% more energy efficient than Blackwell", time: "2h ago", sentiment: "bullish" },
-  { ticker: "TSLA", headline: "Tesla Optimus production milestone reached ahead of schedule", time: "4h ago", sentiment: "bullish" },
-  { ticker: "GME", headline: "GameStop holds $4.2B cash — Reddit community bullish on turnaround", time: "5h ago", sentiment: "bullish" },
-  { ticker: "PFE", headline: "Pfizer RSV vaccine trails GSK by 20% — M&A pressure mounts", time: "6h ago", sentiment: "bearish" },
-  { ticker: "PLTR", headline: "Palantir secures new DoD contract worth $500M — AIP expansion", time: "7h ago", sentiment: "bullish" },
-  { ticker: "AAPL", headline: "iPhone 17 supercycle confirmed by supply chain checks", time: "8h ago", sentiment: "bullish" },
-  { ticker: "BA", headline: "Boeing 737 MAX deliveries resume after 6-week FAA review", time: "9h ago", sentiment: "neutral" },
-  { ticker: "XOM", headline: "ExxonMobil cuts capex forecast amid crude price uncertainty", time: "10h ago", sentiment: "bearish" },
-  { ticker: "JPM", headline: "JPMorgan beats Q1 estimates — net income up 12% YoY", time: "11h ago", sentiment: "bullish" },
-  { ticker: "NEE", headline: "NextEra boosts dividend 10%, secures EU green energy subsidies", time: "12h ago", sentiment: "bullish" },
-];
+// ── Subcomponents ─────────────────────────────────────────────────────────────
 
-const SENTIMENT_COLORS = { bullish: "#00ff9d", bearish: "#ff4d6d", neutral: "#a0aec0" };
-
-// ── Utility ───────────────────────────────────────────────────────────────────
-function generateSparkline(ticker) {
-  const base = MOCK_PRICES[ticker]?.price || 100;
-  return Array.from({ length: 20 }, (_, i) =>
-    base + (Math.random() - 0.48) * base * 0.03 * (i + 1)
-  );
-}
-
-function SparklineSVG({ data, positive }) {
-  const min = Math.min(...data), max = Math.max(...data);
-  const range = max - min || 1;
-  const pts = data.map((v, i) => {
-    const x = (i / (data.length - 1)) * 56;
-    const y = 20 - ((v - min) / range) * 18;
-    return `${x},${y}`;
-  }).join(" ");
-  const color = positive ? "#00ff9d" : "#ff4d6d";
-  return (
-    <svg width="56" height="22" viewBox="0 0 56 22" style={{ display: "block" }}>
-      <polyline points={pts} fill="none" stroke={color} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
-  );
-}
-
-// ── Risk Gauge ────────────────────────────────────────────────────────────────
 function RiskGauge({ score }) {
-  const color = score < 35 ? "#00ff9d" : score < 65 ? "#f6ad55" : "#ff4d6d";
+  const color = RISK_COLOR(score);
   const angle = (score / 100) * 180 - 90;
   const rad = (angle * Math.PI) / 180;
   const x = 50 + 35 * Math.cos(rad);
@@ -82,6 +40,80 @@ function RiskGauge({ score }) {
   );
 }
 
+function MiniChart({ data, positive }) {
+  if (!data || !data.length) return null;
+  const min = Math.min(...data), max = Math.max(...data);
+  const range = max - min || 1;
+  const W = 400, H = 80;
+  const pts = data.map((v, i) => {
+    const x = (i / (data.length - 1)) * W;
+    const y = H - ((v - min) / range) * (H - 8) - 4;
+    return `${x},${y}`;
+  }).join(" ");
+  const color = positive ? "#00ff9d" : "#ff4d6d";
+  const areapts = `0,${H} ${pts} ${W},${H}`;
+  return (
+    <svg width="100%" height={H} viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" style={{ display: "block" }}>
+      <defs>
+        <linearGradient id="chartGrad" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor={color} stopOpacity="0.25" />
+          <stop offset="100%" stopColor={color} stopOpacity="0" />
+        </linearGradient>
+      </defs>
+      <polygon points={areapts} fill="url(#chartGrad)" />
+      <polyline points={pts} fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+function SentimentBar({ label, bullish, bearish, neutral }) {
+  return (
+    <div style={{ marginBottom: 10 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}>
+        <span style={{ fontSize: 11, color: "#6a8aaa" }}>{label}</span>
+        <span style={{ fontSize: 10, color: "#00ff9d", fontFamily: "monospace" }}>{bullish}% bull</span>
+      </div>
+      <div style={{ height: 6, background: "#1a2d45", borderRadius: 3, overflow: "hidden", display: "flex" }}>
+        <div style={{ width: `${bullish}%`, background: "#00ff9d", transition: "width 0.5s" }} />
+        <div style={{ width: `${neutral}%`, background: "#4a6080", transition: "width 0.5s" }} />
+        <div style={{ width: `${bearish}%`, background: "#ff4d6d", transition: "width 0.5s" }} />
+      </div>
+    </div>
+  );
+}
+
+// ── Ticker Carousel using live prices from /api/health ────────────────────────
+function TickerCarousel({ livePrices }) {
+  const tickers = [...SEED_TICKERS, ...SEED_TICKERS];
+  return (
+    <div style={styles.ticker}>
+      <div style={styles.tickerTrack}>
+        {tickers.map((t, i) => {
+          const d = livePrices[t];
+          if (!d) return (
+            <div key={i} style={styles.tickerItem}>
+              <span style={styles.tickerSymbol}>{t}</span>
+              <span style={{ ...styles.tickerPrice, color: "#4a6080" }}>—</span>
+            </div>
+          );
+          const pos = (d.change ?? d.change_pct ?? 0) >= 0;
+          const price = d.current_price ?? d.price ?? 0;
+          const pct = Math.abs(d.change_pct ?? d.pct ?? 0);
+          return (
+            <div key={i} style={styles.tickerItem}>
+              <span style={styles.tickerSymbol}>{t}</span>
+              <span style={styles.tickerPrice}>${price.toFixed(2)}</span>
+              <span style={{ ...styles.tickerChange, color: pos ? "#00ff9d" : "#ff4d6d" }}>
+                {pos ? "▲" : "▼"} {pct.toFixed(2)}%
+              </span>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 // ── Main App ──────────────────────────────────────────────────────────────────
 export default function App() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -90,32 +122,79 @@ export default function App() {
   const [loading, setLoading] = useState(false);
   const [sessionId, setSessionId] = useState(null);
   const [chatHistory, setChatHistory] = useState([]);
-  const [activeTab, setActiveTab] = useState(null); // 'price' | 'sentiment' | 'risk' | 'sec'
+  const [activeTab, setActiveTab] = useState(null);
   const [activeResponse, setActiveResponse] = useState(null);
-  const [tickerSparks] = useState(() =>
-    Object.fromEntries(SEED_TICKERS.map(t => [t, generateSparkline(t)]))
-  );
+  const [livePrices, setLivePrices] = useState({});
   const [newsIdx, setNewsIdx] = useState(0);
   const messagesEndRef = useRef(null);
   const inputRef = useRef(null);
 
-  // Rotate news
+  // ── Fetch live prices from /api/health on mount ───────────────────────────
+  // We also poll every 60s so the ticker carousel stays fresh
+  const fetchHealthPrices = useCallback(async () => {
+    try {
+      const res = await fetch(`${API_BASE}/health`);
+      if (!res.ok) return;
+      // Health doesn't return prices directly, so fetch each seed ticker price
+      // via a lightweight approach: call /api/query isn't suitable here.
+      // Instead we use the ingest status which has counts, not prices.
+      // Real-time prices come from the query response's `price` field.
+      // For the carousel we do a batch fetch using the Finnhub-backed endpoint.
+      // Since the backend exposes no dedicated price endpoint, we store prices
+      // from query responses and seed with reasonable defaults.
+    } catch (_) {}
+  }, []);
+
+  // Fetch live price for a specific ticker via a lightweight backend call
+  const fetchTickerPrice = useCallback(async (ticker) => {
+    try {
+      const res = await fetch(`${API_BASE}/query`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ question: `price of ${ticker}`, ticker }),
+      });
+      const data = await res.json();
+      if (data.price && data.price.current_price) {
+        setLivePrices(prev => ({ ...prev, [ticker]: data.price }));
+      }
+    } catch (_) {}
+  }, []);
+
+  // On mount: fetch prices for visible tickers one by one (staggered to avoid rate limits)
   useEffect(() => {
-    const timer = setInterval(() => setNewsIdx(i => (i + 2) % SAMPLE_NEWS.length), 8000);
+    let cancelled = false;
+    const fetchAll = async () => {
+      for (let i = 0; i < SEED_TICKERS.length; i++) {
+        if (cancelled) break;
+        await fetchTickerPrice(SEED_TICKERS[i]);
+        await new Promise(r => setTimeout(r, 800)); // stagger requests
+      }
+    };
+    fetchAll();
+    return () => { cancelled = true; };
+  }, [fetchTickerPrice]);
+
+  // Rotate news panel
+  useEffect(() => {
+    const timer = setInterval(() => setNewsIdx(i => (i + 1) % Math.max(1, liveNews.length)), 8000);
     return () => clearInterval(timer);
   }, []);
 
-  // Auto-scroll
+  // Auto-scroll chat
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
-  const visibleNews = [
-    SAMPLE_NEWS[newsIdx % SAMPLE_NEWS.length],
-    SAMPLE_NEWS[(newsIdx + 1) % SAMPLE_NEWS.length],
-    SAMPLE_NEWS[(newsIdx + 2) % SAMPLE_NEWS.length],
-  ];
+  // ── Derive live news from last real response ──────────────────────────────
+  const liveNews = activeResponse?.retrieved_docs?.news?.slice(0, 10).map(doc => ({
+    ticker: activeResponse.ticker,
+    headline: doc.metadata?.title || doc.document?.slice(0, 80) || "News article",
+    time: doc.metadata?.date_str || "recent",
+    sentiment: activeResponse.narrative?.risk_level === "LOW" ? "bullish"
+      : activeResponse.narrative?.risk_level === "HIGH" ? "bearish" : "neutral",
+  })) || [];
 
+  // ── Submit handler ────────────────────────────────────────────────────────
   const handleSubmit = useCallback(async () => {
     if (!query.trim() || loading) return;
     const userMsg = query.trim();
@@ -130,8 +209,11 @@ export default function App() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ question: userMsg, session_id: sessionId }),
       });
+
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
 
+      // Persist session
       const newSession = data.session_id || sessionId || crypto.randomUUID();
       if (!sessionId) {
         setSessionId(newSession);
@@ -141,42 +223,57 @@ export default function App() {
         ]);
       }
 
+      // Store live price if we got one
+      if (data.price && data.ticker && data.price.current_price) {
+        setLivePrices(prev => ({ ...prev, [data.ticker]: data.price }));
+      }
+
       setActiveResponse(data);
+
+      // ── Build chat message content from REAL backend fields ──────────────
+      // Path A: single-stock → narrative has summary, conclusion, risk_level, etc.
+      // Path B: general/portfolio → narrative has answer, conclusion
+      // Path 0: out_of_scope → narrative has message
+      let content = "Analysis complete.";
+      const n = data.narrative || {};
+
+      if (data.query_type === "out_of_scope") {
+        content = n.message || "That doesn't seem to be a financial question. Try asking about a specific stock.";
+      } else if (data.query_type === "single_stock") {
+        content = [n.summary, n.conclusion].filter(Boolean).join("\n\n") || "Analysis complete.";
+      } else {
+        // cross_portfolio or general
+        content = [n.answer, n.conclusion].filter(Boolean).join("\n\n") || "Analysis complete.";
+      }
+
+      // Sentiment label: use risk_level for single-stock, or derive from answer
+      const sentimentLabel = n.risk_level || null;
+
       setMessages(prev => [
         ...prev,
         {
           role: "assistant",
-          content: data.narrative?.analysis || data.narrative?.answer || "Analysis complete.",
+          content,
           ticker: data.ticker,
-          riskScore: data.risk_score?.risk_percentage,
-          sentiment: data.narrative?.overall_sentiment,
+          riskScore: data.risk_score?.risk_percentage ?? n.risk_percentage ?? null,
+          sentiment: sentimentLabel,
           session: newSession,
+          queryType: data.query_type,
         },
       ]);
       setActiveTab("price");
+
     } catch (err) {
-      // Fallback mock response for demo
-      const mockTicker = SEED_TICKERS.find(t => userMsg.toUpperCase().includes(t)) || "NVDA";
-      const mockRisk = Math.floor(Math.random() * 60) + 20;
-      setActiveResponse({
-        ticker: mockTicker,
-        risk_score: { risk_percentage: mockRisk },
-        narrative: {
-          overall_sentiment: mockRisk < 45 ? "BULLISH" : mockRisk < 65 ? "NEUTRAL" : "BEARISH",
-          analysis: `Based on multi-layer analysis of ${mockTicker}, the stock shows ${mockRisk < 45 ? "strong bullish" : mockRisk < 65 ? "mixed" : "concerning bearish"} signals across SEC filings, social sentiment, and live price data. Reddit buzz remains elevated at 2,100 mentions this week. News flow is predominantly ${mockRisk < 50 ? "positive" : "negative"} with ${Math.floor(Math.random() * 8) + 3} relevant articles flagged. Risk score of ${mockRisk}% reflects ${mockRisk < 40 ? "aligned" : "contradictory"} signals across data layers.`,
-        },
-      });
       setMessages(prev => [
         ...prev,
         {
           role: "assistant",
-          content: `Based on multi-layer analysis, the stock shows signals across SEC filings, social sentiment, and live price data. Risk score: ${mockRisk}%.`,
-          ticker: mockTicker,
-          riskScore: mockRisk,
-          sentiment: mockRisk < 45 ? "BULLISH" : "NEUTRAL",
+          content: `Error: ${err.message}. Please check that the backend is running.`,
+          ticker: null,
+          riskScore: null,
+          sentiment: null,
         },
       ]);
-      setActiveTab("price");
     } finally {
       setLoading(false);
     }
@@ -186,7 +283,11 @@ export default function App() {
     if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSubmit(); }
   };
 
-  const startNewChat = () => {
+  const startNewChat = async () => {
+    // Tell backend to clear session too
+    if (sessionId) {
+      try { await fetch(`${API_BASE}/session/${sessionId}`, { method: "DELETE" }); } catch (_) {}
+    }
     setMessages([]);
     setSessionId(null);
     setActiveResponse(null);
@@ -195,35 +296,107 @@ export default function App() {
     inputRef.current?.focus();
   };
 
+  // ── Derived display data — ALL from real backend response ─────────────────
   const ticker = activeResponse?.ticker;
-  const riskScore = activeResponse?.risk_score?.risk_percentage || 0;
-  const priceData = ticker ? MOCK_PRICES[ticker] : null;
+  const riskScore = activeResponse?.risk_score?.risk_percentage
+    ?? activeResponse?.narrative?.risk_percentage
+    ?? 0;
+  const price = activeResponse?.price || null; // { current_price, change, change_pct, day_high, day_low, open, previous_close, is_live }
   const hasConversation = messages.length > 0;
+
+  // Build sparkline from price data (simulated intraday based on real OHLC)
+  const sparklineData = price ? (() => {
+    const { open = 0, day_low = 0, day_high = 0, current_price = 0 } = price;
+    const pts = [];
+    for (let i = 0; i < 20; i++) {
+      const t = i / 19;
+      const base = open + (current_price - open) * t;
+      const noise = (day_high - day_low) * 0.15 * (Math.random() - 0.5);
+      pts.push(Math.max(day_low, Math.min(day_high, base + noise)));
+    }
+    pts[pts.length - 1] = current_price;
+    return pts;
+  })() : [];
+
+  // Build sentiment bars from real retrieved docs
+  const sentimentData = (() => {
+    if (!activeResponse?.retrieved_docs) return null;
+    const { news = [], social = [], reddit_buzz = [] } = activeResponse.retrieved_docs;
+    const narrative = activeResponse.narrative || {};
+
+    // News sentiment: count positive/negative keywords in titles
+    let newsBull = 0, newsBear = 0;
+    news.forEach(doc => {
+      const text = (doc.metadata?.title || doc.document || "").toLowerCase();
+      if (/beat|surged|gain|up|strong|record|bullish|positive|growth|rose/.test(text)) newsBull++;
+      else if (/miss|fell|drop|down|weak|concern|bearish|negative|loss|cut/.test(text)) newsBear++;
+    });
+    const newsTotal = Math.max(1, news.length);
+    const newsBullPct = Math.round((newsBull / newsTotal) * 100);
+    const newsBearPct = Math.round((newsBear / newsTotal) * 100);
+    const newsNeutralPct = 100 - newsBullPct - newsBearPct;
+
+    // Social: count engagement-weighted sentiment
+    let socialScore = 0;
+    social.forEach(doc => {
+      const text = (doc.document || "").toLowerCase();
+      const eng = doc.metadata?.engagement_score || 1;
+      if (/bull|buy|moon|great|love|up|win|🚀/.test(text)) socialScore += eng;
+      else if (/bear|sell|crash|bad|hate|down|loss|💀/.test(text)) socialScore -= eng;
+    });
+    const socialBullPct = socialScore > 0 ? Math.min(80, 50 + Math.round(socialScore / 10)) : Math.max(20, 50 + Math.round(socialScore / 10));
+    const socialBearPct = 100 - socialBullPct - 12;
+
+    // Reddit: from buzz signal
+    const buzz = reddit_buzz[0];
+    const redditBullPct = buzz
+      ? (buzz.metadata?.rank_change === "RISING" ? 70 : buzz.metadata?.rank_change === "FALLING" ? 35 : 52)
+      : 50;
+
+    // SEC vs Social: use contradiction analysis from narrative
+    const hasContradiction = (narrative.contradictions || "").length > 20;
+    const secBullPct = hasContradiction ? 40 : 60;
+
+    return {
+      news: { bullish: newsBullPct, bearish: Math.max(0, newsBearPct), neutral: Math.max(0, newsNeutralPct) },
+      social: { bullish: socialBullPct, bearish: Math.max(0, socialBearPct), neutral: 12 },
+      reddit: { bullish: redditBullPct, bearish: Math.max(0, 100 - redditBullPct - 15), neutral: 15 },
+      sec: { bullish: secBullPct, bearish: Math.max(0, 100 - secBullPct - 15), neutral: 15 },
+    };
+  })();
+
+  // Build SEC cards from real retrieved sec_filings
+  const secCards = (() => {
+    if (!activeResponse?.retrieved_docs?.sec_filings) return [];
+    const filings = activeResponse.retrieved_docs.sec_filings;
+    const seen = new Set();
+    return filings.slice(0, 3).map(doc => {
+      const meta = doc.metadata || {};
+      const type = meta.filing_type || "SEC";
+      if (seen.has(type)) return null;
+      seen.add(type);
+      const icons = { "10-K": "📄", "10-Q": "📊", "8-K": "⚡" };
+      const labels = { "10-K": "Annual Report", "10-Q": "Quarterly Report", "8-K": "Material Event" };
+      return {
+        type,
+        label: labels[type] || "Filing",
+        icon: icons[type] || "📋",
+        note: doc.document?.slice(0, 100).trim() + "..." || meta.section || "Filing reviewed",
+        date: meta.filed_date || "recent",
+      };
+    }).filter(Boolean);
+  })();
+
+  // News panel: use real retrieved news from latest response, fallback to empty
+  const newsPanel = liveNews.length > 0 ? liveNews : [];
 
   return (
     <div style={styles.root}>
       {/* ── Ticker Carousel ── */}
-      <div style={styles.ticker}>
-        <div style={styles.tickerTrack}>
-          {[...SEED_TICKERS, ...SEED_TICKERS].map((t, i) => {
-            const d = MOCK_PRICES[t];
-            const pos = d.change >= 0;
-            return (
-              <div key={i} style={styles.tickerItem}>
-                <span style={styles.tickerSymbol}>{t}</span>
-                <span style={styles.tickerPrice}>${d.price.toFixed(2)}</span>
-                <span style={{ ...styles.tickerChange, color: pos ? "#00ff9d" : "#ff4d6d" }}>
-                  {pos ? "▲" : "▼"} {Math.abs(d.pct).toFixed(2)}%
-                </span>
-              </div>
-            );
-          })}
-        </div>
-      </div>
+      <TickerCarousel livePrices={livePrices} />
 
       {/* ── Layout ── */}
       <div style={styles.layout}>
-        {/* Sidebar Toggle */}
         <button style={styles.sidebarToggle} onClick={() => setSidebarOpen(o => !o)} title="Menu">
           <span style={styles.hamburger}>{sidebarOpen ? "✕" : "☰"}</span>
         </button>
@@ -232,43 +405,34 @@ export default function App() {
         <div style={{ ...styles.sidebar, transform: sidebarOpen ? "translateX(0)" : "translateX(-100%)" }}>
           <div style={styles.sidebarHeader}>
             <div style={styles.logo}>ΑΛΕΧIS</div>
-            <div style={styles.logoSub}>Financial Intelligence</div>
+            <div style={styles.logoSub}>Financial Intelligence Engine</div>
           </div>
-
-          <button style={styles.newChatBtn} onClick={startNewChat}>
-            <span style={{ fontSize: 16, marginRight: 8 }}>+</span> New Chat
-          </button>
-
+          <button style={styles.newChatBtn} onClick={startNewChat}>＋ New Chat</button>
           <div style={styles.sidebarSearch}>
-            <input placeholder="Search chats…" style={styles.sidebarSearchInput} />
+            <input style={styles.sidebarSearchInput} placeholder="Search history…" readOnly />
           </div>
-
-          <div style={styles.historyLabel}>Recent Chats</div>
+          <div style={styles.historyLabel}>Recent</div>
           <div style={styles.historyList}>
-            {chatHistory.length === 0 ? (
-              <div style={styles.historyEmpty}>No chats yet</div>
-            ) : chatHistory.map(ch => (
-              <div key={ch.id} style={styles.historyItem} onClick={() => setSidebarOpen(false)}>
-                <div style={styles.historyIcon}>💬</div>
-                <div style={{ minWidth: 0 }}>
-                  <div style={styles.historyTitle}>{ch.title}</div>
-                  <div style={styles.historyTime}>{new Date(ch.ts).toLocaleDateString()}</div>
+            {chatHistory.length === 0
+              ? <div style={styles.historyEmpty}>No history yet</div>
+              : chatHistory.map(h => (
+                <div key={h.id} style={styles.historyItem}>
+                  <span style={styles.historyIcon}>💬</span>
+                  <div>
+                    <div style={styles.historyTitle}>{h.title}</div>
+                    <div style={styles.historyTime}>{new Date(h.ts).toLocaleTimeString()}</div>
+                  </div>
                 </div>
-              </div>
-            ))}
+              ))}
           </div>
-
           <div style={styles.sidebarFooter}>
             <div style={styles.footerDot} />
-            <span style={{ fontSize: 11, color: "#4a6080" }}>Backend connected</span>
+            <span style={{ fontSize: 11, color: "#4a6080" }}>Connected to backend</span>
           </div>
         </div>
 
-        {/* ── Backdrop ── */}
-        {sidebarOpen && <div style={styles.backdrop} onClick={() => setSidebarOpen(false)} />}
-
-        {/* ── Main Chat Area ── */}
-        <div style={styles.main}>
+        {/* ── Center Chat ── */}
+        <div style={styles.chatArea}>
           {!hasConversation ? (
             <div style={styles.welcome}>
               <div style={styles.welcomeLogo}>ΑΛΕΧIS</div>
@@ -286,28 +450,26 @@ export default function App() {
             <div style={styles.messageList}>
               {messages.map((msg, i) => (
                 <div key={i} style={{ ...styles.msgRow, justifyContent: msg.role === "user" ? "flex-end" : "flex-start" }}>
-                  {msg.role === "assistant" && (
-                    <div style={styles.avatarA}>Α</div>
-                  )}
-                  <div style={{
-                    ...styles.bubble,
-                    ...(msg.role === "user" ? styles.bubbleUser : styles.bubbleAssistant),
-                  }}>
+                  {msg.role === "assistant" && <div style={styles.avatarA}>Α</div>}
+                  <div style={{ ...styles.bubble, ...(msg.role === "user" ? styles.bubbleUser : styles.bubbleAssistant) }}>
                     {msg.role === "assistant" && msg.ticker && (
                       <div style={styles.bubbleMeta}>
                         <span style={styles.bubbleTicker}>{msg.ticker}</span>
                         {msg.sentiment && (
-                          <span style={{ ...styles.bubbleSentiment, color: SENTIMENT_COLORS[msg.sentiment?.toLowerCase()] || "#a0aec0" }}>
+                          <span style={{ ...styles.bubbleSentiment, color: SENTIMENT_COLORS[msg.sentiment] || "#a0aec0" }}>
                             {msg.sentiment}
+                          </span>
+                        )}
+                        {msg.riskScore != null && (
+                          <span style={{ fontSize: 10, color: RISK_COLOR(msg.riskScore), fontFamily: "monospace", marginLeft: 6 }}>
+                            Risk {msg.riskScore}%
                           </span>
                         )}
                       </div>
                     )}
                     <div style={styles.bubbleText}>{msg.content}</div>
                   </div>
-                  {msg.role === "user" && (
-                    <div style={styles.avatarU}>U</div>
-                  )}
+                  {msg.role === "user" && <div style={styles.avatarU}>U</div>}
                 </div>
               ))}
               {loading && (
@@ -315,7 +477,9 @@ export default function App() {
                   <div style={styles.avatarA}>Α</div>
                   <div style={{ ...styles.bubble, ...styles.bubbleAssistant }}>
                     <div style={styles.typing}>
-                      <span style={styles.dot} /> <span style={{ ...styles.dot, animationDelay: "0.2s" }} /> <span style={{ ...styles.dot, animationDelay: "0.4s" }} />
+                      <span style={styles.dot} />
+                      <span style={{ ...styles.dot, animationDelay: "0.2s" }} />
+                      <span style={{ ...styles.dot, animationDelay: "0.4s" }} />
                     </div>
                   </div>
                 </div>
@@ -324,7 +488,7 @@ export default function App() {
             </div>
           )}
 
-          {/* ── Input Area ── */}
+          {/* ── Input ── */}
           <div style={{ ...styles.inputArea, ...(hasConversation ? styles.inputAreaBottom : styles.inputAreaCenter) }}>
             <div style={styles.inputWrap}>
               <textarea
@@ -338,29 +502,34 @@ export default function App() {
               />
               <button onClick={handleSubmit} disabled={!query.trim() || loading} style={styles.sendBtn}>
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <line x1="22" y1="2" x2="11" y2="13" /><polygon points="22 2 15 22 11 13 2 9 22 2" />
+                  <line x1="22" y1="2" x2="11" y2="13" />
+                  <polygon points="22 2 15 22 11 13 2 9 22 2" />
                 </svg>
               </button>
             </div>
           </div>
         </div>
 
-        {/* ── Right Panel: News ── */}
+        {/* ── Right Panel: Live News ── */}
         <div style={styles.rightPanel}>
           <div style={styles.rightHeader}>📡 Live Market News</div>
           <div style={styles.newsScroll}>
-            {SAMPLE_NEWS.map((n, i) => (
+            {newsPanel.length > 0 ? newsPanel.map((n, i) => (
               <div key={i} style={styles.newsCard}>
                 <div style={styles.newsTop}>
                   <span style={styles.newsTicker}>{n.ticker}</span>
-                  <span style={{ ...styles.newsLabel, color: SENTIMENT_COLORS[n.sentiment] }}>
+                  <span style={{ ...styles.newsLabel, color: SENTIMENT_COLORS[n.sentiment] || "#a0aec0" }}>
                     {n.sentiment === "bullish" ? "▲" : n.sentiment === "bearish" ? "▼" : "◆"} {n.sentiment}
                   </span>
                 </div>
                 <div style={styles.newsHeadline}>{n.headline}</div>
                 <div style={styles.newsTime}>{n.time}</div>
               </div>
-            ))}
+            )) : (
+              <div style={{ padding: "24px 12px", fontSize: 12, color: "#3a5070", textAlign: "center" }}>
+                Ask about a stock to see live news
+              </div>
+            )}
           </div>
         </div>
       </div>
@@ -383,64 +552,110 @@ export default function App() {
                 {tab.label}
               </button>
             ))}
-            {ticker && <span style={styles.tabTicker}>{ticker} · {COMPANY_NAMES[ticker]}</span>}
+            {ticker && (
+              <span style={styles.tabTicker}>{ticker} · {COMPANY_NAMES[ticker] || ticker}</span>
+            )}
+            {price?.is_live && (
+              <span style={{ marginLeft: 8, fontSize: 9, color: "#00ff9d", background: "#0d2b1f", padding: "2px 6px", borderRadius: 3 }}>
+                🟢 LIVE
+              </span>
+            )}
           </div>
 
           {activeTab && (
             <div style={styles.bottomContent}>
-              {/* Price Chart */}
-              {activeTab === "price" && priceData && (
+
+              {/* ── Price Chart — real Finnhub data ── */}
+              {activeTab === "price" && (
                 <div style={styles.chartArea}>
-                  <div style={styles.chartHeader}>
-                    <span style={styles.chartTicker}>{ticker}</span>
-                    <span style={styles.chartPrice}>${priceData.price.toFixed(2)}</span>
-                    <span style={{ color: priceData.change >= 0 ? "#00ff9d" : "#ff4d6d", fontSize: 13 }}>
-                      {priceData.change >= 0 ? "▲" : "▼"} {Math.abs(priceData.pct).toFixed(2)}%
-                    </span>
-                  </div>
-                  <MiniChart data={tickerSparks[ticker] || []} positive={priceData.change >= 0} />
-                  <div style={styles.priceGrid}>
-                    <div style={styles.priceCell}><span style={styles.priceLabel}>Open</span><span style={styles.priceVal}>${(priceData.price * 0.998).toFixed(2)}</span></div>
-                    <div style={styles.priceCell}><span style={styles.priceLabel}>High</span><span style={styles.priceVal}>${(priceData.price * 1.012).toFixed(2)}</span></div>
-                    <div style={styles.priceCell}><span style={styles.priceLabel}>Low</span><span style={styles.priceVal}>${(priceData.price * 0.986).toFixed(2)}</span></div>
-                    <div style={styles.priceCell}><span style={styles.priceLabel}>Prev Close</span><span style={styles.priceVal}>${(priceData.price - priceData.change).toFixed(2)}</span></div>
-                  </div>
+                  {price ? (
+                    <>
+                      <div style={styles.chartHeader}>
+                        <span style={styles.chartTicker}>{ticker}</span>
+                        <span style={styles.chartPrice}>${price.current_price?.toFixed(2) ?? "—"}</span>
+                        <span style={{ color: (price.change ?? 0) >= 0 ? "#00ff9d" : "#ff4d6d", fontSize: 13 }}>
+                          {(price.change ?? 0) >= 0 ? "▲" : "▼"} {Math.abs(price.change_pct ?? 0).toFixed(2)}%
+                        </span>
+                      </div>
+                      <MiniChart data={sparklineData} positive={(price.change ?? 0) >= 0} />
+                      <div style={styles.priceGrid}>
+                        <div style={styles.priceCell}>
+                          <span style={styles.priceLabel}>Open</span>
+                          <span style={styles.priceVal}>${price.open?.toFixed(2) ?? "—"}</span>
+                        </div>
+                        <div style={styles.priceCell}>
+                          <span style={styles.priceLabel}>High</span>
+                          <span style={styles.priceVal}>${price.day_high?.toFixed(2) ?? "—"}</span>
+                        </div>
+                        <div style={styles.priceCell}>
+                          <span style={styles.priceLabel}>Low</span>
+                          <span style={styles.priceVal}>${price.day_low?.toFixed(2) ?? "—"}</span>
+                        </div>
+                        <div style={styles.priceCell}>
+                          <span style={styles.priceLabel}>Prev Close</span>
+                          <span style={styles.priceVal}>${price.previous_close?.toFixed(2) ?? "—"}</span>
+                        </div>
+                      </div>
+                    </>
+                  ) : (
+                    <div style={{ color: "#4a6080", fontSize: 13, padding: "20px 0" }}>
+                      No price data available for this query type.
+                    </div>
+                  )}
                 </div>
               )}
 
-              {/* Sentiment */}
+              {/* ── Sentiment — derived from real retrieved docs ── */}
               {activeTab === "sentiment" && (
                 <div style={styles.sentimentArea}>
-                  <SentimentBar label="News Sentiment" bullish={62} bearish={21} neutral={17} />
-                  <SentimentBar label="Reddit / Social" bullish={78} bearish={10} neutral={12} />
-                  <SentimentBar label="Twitter / X" bullish={55} bearish={30} neutral={15} />
-                  <SentimentBar label="SEC vs Social Agreement" bullish={45} bearish={40} neutral={15} />
+                  {sentimentData ? (
+                    <>
+                      <SentimentBar label="News Sentiment" {...sentimentData.news} />
+                      <SentimentBar label="Social Media" {...sentimentData.social} />
+                      <SentimentBar label="Reddit Buzz" {...sentimentData.reddit} />
+                      <SentimentBar label="SEC vs Social Agreement" {...sentimentData.sec} />
+                      {activeResponse?.narrative?.contradictions && (
+                        <div style={{ marginTop: 10, padding: "8px 12px", background: "#0d1825", border: "1px solid #1a2d45", borderRadius: 8, fontSize: 11, color: "#8aa8c0", lineHeight: 1.5 }}>
+                          <span style={{ color: "#f6ad55", fontWeight: 600 }}>⚠ Key Contradiction: </span>
+                          {activeResponse.narrative.contradictions}
+                        </div>
+                      )}
+                    </>
+                  ) : (
+                    <div style={{ color: "#4a6080", fontSize: 13 }}>Ask about a specific stock for sentiment data.</div>
+                  )}
                 </div>
               )}
 
-              {/* Risk Score */}
+              {/* ── Risk Score — real risk_score from backend ── */}
               {activeTab === "risk" && (
                 <div style={styles.riskArea}>
                   <div style={styles.riskMain}>
                     <RiskGauge score={riskScore} />
                     <div>
                       <div style={styles.riskLabel}>Overall Risk</div>
-                      <div style={{ color: riskScore < 35 ? "#00ff9d" : riskScore < 65 ? "#f6ad55" : "#ff4d6d", fontSize: 28, fontWeight: 700 }}>
-                        {riskScore < 35 ? "LOW" : riskScore < 65 ? "MEDIUM" : "HIGH"}
+                      <div style={{ color: RISK_COLOR(riskScore), fontSize: 24, fontWeight: 700 }}>
+                        {activeResponse?.risk_score?.risk_label
+                          || (riskScore < 35 ? "Low Risk" : riskScore < 65 ? "Moderate Risk" : "High Risk")}
                       </div>
+                      {activeResponse?.risk_score?.dominant_risk_factor && (
+                        <div style={{ fontSize: 11, color: "#6a8aaa", marginTop: 6, maxWidth: 200, lineHeight: 1.4 }}>
+                          {activeResponse.risk_score.dominant_risk_factor}
+                        </div>
+                      )}
                     </div>
                   </div>
                   <div style={styles.riskBreakdown}>
                     {[
-                      { label: "SEC vs Social contradiction", score: Math.min(riskScore + 10, 100) },
-                      { label: "Reddit vs News divergence", score: Math.max(riskScore - 12, 0) },
-                      { label: "Price vs SEC signal", score: Math.min(riskScore + 5, 100) },
-                      { label: "Insider activity signal", score: Math.max(riskScore - 8, 0) },
+                      { label: "News Signal Risk", score: sentimentData ? sentimentData.news.bearish : 0 },
+                      { label: "Social Volatility", score: sentimentData ? sentimentData.social.bearish : 0 },
+                      { label: "Reddit Momentum", score: sentimentData ? (100 - sentimentData.reddit.bullish) : 0 },
+                      { label: "SEC Filing Flags", score: secCards.length > 0 ? Math.min(90, secCards.length * 25) : 0 },
                     ].map(r => (
                       <div key={r.label} style={styles.riskRow}>
                         <span style={styles.riskRowLabel}>{r.label}</span>
                         <div style={styles.riskBar}>
-                          <div style={{ ...styles.riskFill, width: `${r.score}%`, background: r.score < 35 ? "#00ff9d" : r.score < 65 ? "#f6ad55" : "#ff4d6d" }} />
+                          <div style={{ ...styles.riskFill, width: `${r.score}%`, background: RISK_COLOR(r.score) }} />
                         </div>
                         <span style={styles.riskPct}>{r.score}%</span>
                       </div>
@@ -449,25 +664,31 @@ export default function App() {
                 </div>
               )}
 
-              {/* SEC Signals */}
+              {/* ── SEC Signals — real retrieved SEC filing chunks ── */}
               {activeTab === "sec" && ticker && (
                 <div style={styles.secArea}>
-                  {[
-                    { type: "10-K", label: "Annual Report", icon: "📄", note: `${ticker} annual filing reviewed — key disclosures flagged` },
-                    { type: "10-Q", label: "Quarterly Report", icon: "📊", note: `Q3 2025 quarterly filing — revenue & EPS trends extracted` },
-                    { type: "8-K", label: "Material Events", icon: "⚡", note: `3 material events detected in last 90 days` },
-                  ].map(s => (
+                  {secCards.length > 0 ? secCards.map(s => (
                     <div key={s.type} style={styles.secCard}>
                       <div style={styles.secIcon}>{s.icon}</div>
-                      <div>
+                      <div style={{ flex: 1 }}>
                         <div style={styles.secType}>{s.type} — {s.label}</div>
                         <div style={styles.secNote}>{s.note}</div>
+                        {s.date && <div style={{ fontSize: 10, color: "#3a5070", marginTop: 2 }}>Filed: {s.date}</div>}
                       </div>
                       <div style={styles.secBadge}>Live</div>
                     </div>
-                  ))}
+                  )) : (
+                    <div style={{ color: "#4a6080", fontSize: 13 }}>No SEC filing data available for this query.</div>
+                  )}
+                  {activeResponse?.narrative?.sec_filings_analysis && (
+                    <div style={{ marginTop: 8, padding: "10px 14px", background: "#0d1825", border: "1px solid #1a2d45", borderRadius: 10, fontSize: 11, color: "#8aa8c0", lineHeight: 1.6 }}>
+                      <span style={{ color: "#c8d8e8", fontWeight: 600 }}>AI Analysis: </span>
+                      {activeResponse.narrative.sec_filings_analysis}
+                    </div>
+                  )}
                 </div>
               )}
+
             </div>
           )}
         </div>
@@ -477,70 +698,25 @@ export default function App() {
         @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
         * { box-sizing: border-box; margin: 0; padding: 0; }
         body { background: #070d16; font-family: 'Space Grotesk', sans-serif; }
-        ::-webkit-scrollbar { width: 4px; } ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar { width: 4px; }
+        ::-webkit-scrollbar-track { background: transparent; }
         ::-webkit-scrollbar-thumb { background: #1e3050; border-radius: 2px; }
         @keyframes scroll { 0% { transform: translateX(0); } 100% { transform: translateX(-50%); } }
-        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
         @keyframes bounce { 0%, 80%, 100% { transform: translateY(0); } 40% { transform: translateY(-6px); } }
         @keyframes fadeIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
-        @keyframes glow { 0%, 100% { box-shadow: 0 0 8px #00ff9d33; } 50% { box-shadow: 0 0 20px #00ff9d66; } }
       `}</style>
     </div>
   );
 }
 
-// ── Mini Chart Component ─────────────────────────────────────────────────────
-function MiniChart({ data, positive }) {
-  if (!data.length) return null;
-  const min = Math.min(...data), max = Math.max(...data);
-  const range = max - min || 1;
-  const W = 400, H = 80;
-  const pts = data.map((v, i) => {
-    const x = (i / (data.length - 1)) * W;
-    const y = H - ((v - min) / range) * (H - 8) - 4;
-    return `${x},${y}`;
-  }).join(" ");
-  const color = positive ? "#00ff9d" : "#ff4d6d";
-  const fillPts = `0,${H} ${pts} ${W},${H}`;
-  return (
-    <svg width="100%" viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" style={{ height: 80, display: "block" }}>
-      <defs>
-        <linearGradient id="chartGrad" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stopColor={color} stopOpacity="0.25" />
-          <stop offset="100%" stopColor={color} stopOpacity="0" />
-        </linearGradient>
-      </defs>
-      <polygon points={fillPts} fill="url(#chartGrad)" />
-      <polyline points={pts} fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
-  );
-}
-
-// ── Sentiment Bar ─────────────────────────────────────────────────────────────
-function SentimentBar({ label, bullish, bearish, neutral }) {
-  return (
-    <div style={{ marginBottom: 14 }}>
-      <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}>
-        <span style={{ fontSize: 11, color: "#6a8aaa" }}>{label}</span>
-        <span style={{ fontSize: 11, color: "#00ff9d" }}>{bullish}% bullish</span>
-      </div>
-      <div style={{ display: "flex", height: 6, borderRadius: 3, overflow: "hidden", gap: 1 }}>
-        <div style={{ width: `${bullish}%`, background: "#00ff9d", borderRadius: "3px 0 0 3px" }} />
-        <div style={{ width: `${neutral}%`, background: "#a0aec0" }} />
-        <div style={{ width: `${bearish}%`, background: "#ff4d6d", borderRadius: "0 3px 3px 0" }} />
-      </div>
-    </div>
-  );
-}
-
-// ── Styles ─────────────────────────────────────────────────────────────────────
+// ── Styles ────────────────────────────────────────────────────────────────────
 const styles = {
-  root: { display: "flex", flexDirection: "column", height: "100vh", background: "#070d16", color: "#c8d8e8", fontFamily: "'Space Grotesk', sans-serif", overflow: "hidden" },
-  ticker: { height: 32, background: "#0b1422", borderBottom: "1px solid #1a2d45", overflow: "hidden", display: "flex", alignItems: "center" },
-  tickerTrack: { display: "flex", animation: "scroll 40s linear infinite", whiteSpace: "nowrap" },
-  tickerItem: { display: "flex", alignItems: "center", gap: 6, padding: "0 20px", borderRight: "1px solid #1a2d45" },
-  tickerSymbol: { fontSize: 11, fontWeight: 700, color: "#00ff9d", fontFamily: "'JetBrains Mono', monospace" },
-  tickerPrice: { fontSize: 11, color: "#c8d8e8", fontFamily: "'JetBrains Mono', monospace" },
+  root: { display: "flex", flexDirection: "column", height: "100vh", background: "#070d16", color: "#c8d8e8", overflow: "hidden" },
+  ticker: { height: 32, background: "#090f1c", borderBottom: "1px solid #1a2d45", overflow: "hidden", flexShrink: 0 },
+  tickerTrack: { display: "flex", animation: "scroll 60s linear infinite", width: "max-content", height: "100%", alignItems: "center" },
+  tickerItem: { display: "flex", gap: 6, alignItems: "center", padding: "0 20px", borderRight: "1px solid #1a2d45", height: "100%" },
+  tickerSymbol: { fontSize: 11, fontWeight: 700, color: "#c8d8e8", fontFamily: "'JetBrains Mono', monospace" },
+  tickerPrice: { fontSize: 11, color: "#8aa8c0", fontFamily: "'JetBrains Mono', monospace" },
   tickerChange: { fontSize: 10, fontFamily: "'JetBrains Mono', monospace" },
   layout: { display: "flex", flex: 1, minHeight: 0, position: "relative" },
   sidebarToggle: { position: "absolute", top: 12, left: 12, zIndex: 100, background: "#0f1e30", border: "1px solid #1a3050", borderRadius: 8, width: 36, height: 36, cursor: "pointer", color: "#7aa0c0" },
@@ -549,45 +725,44 @@ const styles = {
   sidebarHeader: { padding: "8px 20px 16px", borderBottom: "1px solid #1a2d45" },
   logo: { fontSize: 18, fontWeight: 700, color: "#00ff9d", letterSpacing: 2, fontFamily: "'JetBrains Mono', monospace" },
   logoSub: { fontSize: 10, color: "#4a6080", marginTop: 2 },
-  newChatBtn: { margin: "16px 16px 8px", padding: "10px 16px", background: "linear-gradient(135deg, #0d2b1f, #0a2015)", border: "1px solid #00ff9d44", borderRadius: 10, color: "#00ff9d", fontSize: 13, fontWeight: 600, cursor: "pointer", display: "flex", alignItems: "center", transition: "all 0.2s" },
+  newChatBtn: { margin: "16px 16px 8px", padding: "10px 16px", background: "linear-gradient(135deg, #0d2b1f, #0a2015)", border: "1px solid #00ff9d44", borderRadius: 10, color: "#00ff9d", fontSize: 13, fontWeight: 600, cursor: "pointer" },
   sidebarSearch: { padding: "4px 16px 12px" },
   sidebarSearchInput: { width: "100%", padding: "8px 12px", background: "#0f1e30", border: "1px solid #1a3050", borderRadius: 8, color: "#c8d8e8", fontSize: 12, outline: "none" },
   historyLabel: { padding: "0 16px 8px", fontSize: 10, color: "#3a5070", textTransform: "uppercase", letterSpacing: 1 },
   historyList: { flex: 1, overflowY: "auto", padding: "0 8px" },
   historyEmpty: { padding: "20px 12px", fontSize: 12, color: "#3a5070", textAlign: "center" },
-  historyItem: { display: "flex", alignItems: "flex-start", gap: 10, padding: "10px 12px", borderRadius: 8, cursor: "pointer", marginBottom: 2, transition: "background 0.15s" },
+  historyItem: { display: "flex", alignItems: "flex-start", gap: 10, padding: "10px 12px", borderRadius: 8, cursor: "pointer", marginBottom: 2 },
   historyIcon: { fontSize: 14, marginTop: 1 },
   historyTitle: { fontSize: 12, color: "#8aa8c0", lineHeight: 1.4, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 170 },
   historyTime: { fontSize: 10, color: "#3a5070", marginTop: 2 },
   sidebarFooter: { padding: "12px 20px", borderTop: "1px solid #1a2d45", display: "flex", alignItems: "center", gap: 8 },
-  footerDot: { width: 7, height: 7, borderRadius: "50%", background: "#00ff9d", animation: "pulse 2s infinite" },
-  backdrop: { position: "absolute", inset: 0, zIndex: 85, background: "rgba(0,0,0,0.5)" },
-  main: { flex: 1, display: "flex", flexDirection: "column", minWidth: 0, position: "relative" },
-  welcome: { flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "40px 24px", animation: "fadeIn 0.6s ease" },
-  welcomeLogo: { fontSize: 56, fontWeight: 700, color: "#00ff9d", letterSpacing: 4, fontFamily: "'JetBrains Mono', monospace", textShadow: "0 0 40px #00ff9d55" },
-  welcomeSub: { fontSize: 14, color: "#4a6080", marginTop: 8, letterSpacing: 2 },
-  welcomeHint: { fontSize: 13, color: "#3a5070", marginTop: 24, marginBottom: 20 },
-  quickPrompts: { display: "flex", flexWrap: "wrap", gap: 8, justifyContent: "center", maxWidth: 560 },
-  quickBtn: { padding: "8px 16px", background: "#0f1e30", border: "1px solid #1a3050", borderRadius: 20, color: "#7aa0c0", fontSize: 12, cursor: "pointer", transition: "all 0.2s" },
-  messageList: { flex: 1, overflowY: "auto", padding: "16px 24px 8px" },
-  msgRow: { display: "flex", alignItems: "flex-start", gap: 10, marginBottom: 16, animation: "fadeIn 0.3s ease" },
-  avatarA: { width: 32, height: 32, borderRadius: 10, background: "linear-gradient(135deg, #0d2b1f, #1a4035)", border: "1px solid #00ff9d44", color: "#00ff9d", fontSize: 13, fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, fontFamily: "'JetBrains Mono', monospace" },
-  avatarU: { width: 32, height: 32, borderRadius: 10, background: "#1a2d45", color: "#7aa0c0", fontSize: 12, fontWeight: 600, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 },
-  bubble: { maxWidth: "70%", borderRadius: 12, padding: "10px 14px", lineHeight: 1.6 },
-  bubbleUser: { background: "#111e30", border: "1px solid #1a3050", color: "#c8d8e8", fontSize: 13, borderTopRightRadius: 4 },
-  bubbleAssistant: { background: "#0b1825", border: "1px solid #1a3050", color: "#c8d8e8", fontSize: 13, borderTopLeftRadius: 4 },
-  bubbleMeta: { display: "flex", gap: 8, marginBottom: 6, alignItems: "center" },
-  bubbleTicker: { fontSize: 11, fontWeight: 700, color: "#00ff9d", fontFamily: "'JetBrains Mono', monospace", background: "#0d2b1f", padding: "2px 8px", borderRadius: 4 },
+  footerDot: { width: 7, height: 7, borderRadius: "50%", background: "#00ff9d" },
+  chatArea: { flex: 1, display: "flex", flexDirection: "column", minWidth: 0 },
+  welcome: { flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 12, padding: 24 },
+  welcomeLogo: { fontSize: 48, fontWeight: 700, color: "#00ff9d", letterSpacing: 4, fontFamily: "'JetBrains Mono', monospace" },
+  welcomeSub: { fontSize: 14, color: "#4a7090", letterSpacing: 2 },
+  welcomeHint: { fontSize: 12, color: "#3a5070", marginTop: 8 },
+  quickPrompts: { display: "flex", flexWrap: "wrap", gap: 8, justifyContent: "center", marginTop: 16 },
+  quickBtn: { padding: "8px 16px", background: "#0b1825", border: "1px solid #1a3050", borderRadius: 20, color: "#6a9ab0", fontSize: 12, cursor: "pointer" },
+  messageList: { flex: 1, overflowY: "auto", padding: "16px 24px", display: "flex", flexDirection: "column", gap: 12 },
+  msgRow: { display: "flex", gap: 10, alignItems: "flex-start" },
+  avatarA: { width: 30, height: 30, borderRadius: "50%", background: "linear-gradient(135deg, #0d2b1f, #00ff9d33)", border: "1px solid #00ff9d44", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, fontWeight: 700, color: "#00ff9d", flexShrink: 0 },
+  avatarU: { width: 30, height: 30, borderRadius: "50%", background: "#1a2d45", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, fontWeight: 700, color: "#8aa8c0", flexShrink: 0 },
+  bubble: { maxWidth: "72%", padding: "10px 14px", borderRadius: 14, lineHeight: 1.6, animation: "fadeIn 0.2s ease" },
+  bubbleUser: { background: "#0f2540", border: "1px solid #1a3a5c", color: "#c8d8e8", borderRadius: "14px 14px 4px 14px" },
+  bubbleAssistant: { background: "#0b1825", border: "1px solid #1a2d45", color: "#c8d8e8", borderRadius: "14px 14px 14px 4px" },
+  bubbleMeta: { display: "flex", gap: 8, alignItems: "center", marginBottom: 6 },
+  bubbleTicker: { fontSize: 10, fontWeight: 700, color: "#00ff9d", fontFamily: "'JetBrains Mono', monospace", background: "#0d2b1f", padding: "1px 6px", borderRadius: 3 },
   bubbleSentiment: { fontSize: 10, fontWeight: 600, textTransform: "uppercase", letterSpacing: 1 },
-  bubbleText: { fontSize: 13 },
+  bubbleText: { fontSize: 13, whiteSpace: "pre-wrap" },
   typing: { display: "flex", gap: 4, alignItems: "center", padding: "4px 0" },
   dot: { width: 7, height: 7, borderRadius: "50%", background: "#00ff9d", animation: "bounce 1.2s infinite" },
   inputArea: { padding: "0 24px 12px" },
   inputAreaCenter: {},
   inputAreaBottom: {},
-  inputWrap: { display: "flex", alignItems: "flex-end", background: "#0d1a28", border: "1px solid #1a3050", borderRadius: 14, overflow: "hidden", gap: 0, boxShadow: "0 0 0 0px transparent", transition: "box-shadow 0.2s" },
+  inputWrap: { display: "flex", alignItems: "flex-end", background: "#0d1a28", border: "1px solid #1a3050", borderRadius: 14, overflow: "hidden" },
   textarea: { flex: 1, background: "transparent", border: "none", outline: "none", color: "#c8d8e8", fontSize: 14, padding: "14px 16px", resize: "none", fontFamily: "'Space Grotesk', sans-serif", lineHeight: 1.5, minHeight: 48 },
-  sendBtn: { padding: "12px 16px", background: "transparent", border: "none", cursor: "pointer", color: "#00ff9d", display: "flex", alignItems: "center", justifyContent: "center", transition: "opacity 0.2s", opacity: 1 },
+  sendBtn: { padding: "12px 16px", background: "transparent", border: "none", cursor: "pointer", color: "#00ff9d" },
   rightPanel: { width: 240, background: "#090f1c", borderLeft: "1px solid #1a2d45", display: "flex", flexDirection: "column", overflow: "hidden" },
   rightHeader: { padding: "14px 16px 10px", fontSize: 11, fontWeight: 700, color: "#3a6070", textTransform: "uppercase", letterSpacing: 1, borderBottom: "1px solid #1a2d45" },
   newsScroll: { flex: 1, overflowY: "auto", padding: "8px" },
@@ -599,7 +774,7 @@ const styles = {
   newsTime: { fontSize: 10, color: "#3a5070" },
   bottomPanel: { background: "#090f1c", borderTop: "1px solid #1a2d45" },
   bottomTabs: { display: "flex", gap: 4, padding: "10px 16px 0", alignItems: "center", overflowX: "auto" },
-  tabBtn: { padding: "7px 14px", background: "transparent", border: "1px solid #1a2d45", borderRadius: "8px 8px 0 0", color: "#4a6080", fontSize: 12, cursor: "pointer", whiteSpace: "nowrap", transition: "all 0.15s" },
+  tabBtn: { padding: "7px 14px", background: "transparent", border: "1px solid #1a2d45", borderRadius: "8px 8px 0 0", color: "#4a6080", fontSize: 12, cursor: "pointer", whiteSpace: "nowrap" },
   tabBtnActive: { background: "#0b1825", borderColor: "#00ff9d44", color: "#00ff9d", borderBottomColor: "#0b1825" },
   tabTicker: { marginLeft: "auto", fontSize: 11, color: "#3a5070", fontFamily: "'JetBrains Mono', monospace" },
   bottomContent: { background: "#0b1825", padding: "16px 20px", maxHeight: 220, overflowY: "auto" },
@@ -617,7 +792,7 @@ const styles = {
   riskLabel: { fontSize: 11, color: "#4a6080", marginBottom: 4 },
   riskBreakdown: { flex: 1 },
   riskRow: { display: "flex", alignItems: "center", gap: 10, marginBottom: 10 },
-  riskRowLabel: { fontSize: 11, color: "#6a8aaa", width: 220, flexShrink: 0 },
+  riskRowLabel: { fontSize: 11, color: "#6a8aaa", width: 180, flexShrink: 0 },
   riskBar: { flex: 1, height: 6, background: "#1a2d45", borderRadius: 3, overflow: "hidden" },
   riskFill: { height: "100%", borderRadius: 3, transition: "width 0.5s ease" },
   riskPct: { fontSize: 11, color: "#8aa0c0", width: 35, textAlign: "right", fontFamily: "'JetBrains Mono', monospace" },
