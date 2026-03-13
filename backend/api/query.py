@@ -48,12 +48,12 @@ import re
 import uuid
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException 
+from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 from openai import OpenAI
 
 from core.config import SEED_TICKERS, OPENAI_API_KEY, SYNTHESIS_MODEL
-from retrieval.workflow import retrieve_all, run_cross_portfolio_retrieval 
+from retrieval.workflow import retrieve_all, run_cross_portfolio_retrieval
 from synthesis.synthesizer import synthesize, synthesize_general
 from synthesis.schemas import QueryType
 from memory.session_store import get_history, append_turn, clear_session, session_count
@@ -401,6 +401,39 @@ async def query(request: QueryRequest):
 
 
 # ── Session management endpoints ──────────────────────────────────────────────
+
+@router.get(
+    "/history/{session_id}",
+    summary="Get conversation history for a session",
+    tags=["Session"],
+)
+async def get_session_history(session_id: str):
+    """
+    Return the full conversation history for a given session.
+
+    Useful for:
+      - Debugging memory behaviour during frontend development
+      - Verifying that history is being stored correctly after each turn
+      - The frontend can call this on page load to restore a previous session
+
+    Response format:
+      {
+        "session_id": "abc-123",
+        "turn_count": 3,
+        "turns": [
+          {"role": "user",      "content": "...", "ticker": "TSLA", "turn": 1},
+          {"role": "assistant", "content": "...", "ticker": "TSLA", "turn": 1},
+          ...
+        ]
+      }
+    """
+    history = get_history(session_id)
+    return {
+        "session_id" : session_id,
+        "turn_count" : len(history) // 2,
+        "turns"      : history,
+    }
+
 
 @router.delete(
     "/session/{session_id}",
