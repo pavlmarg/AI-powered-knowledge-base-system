@@ -8,14 +8,11 @@ openai==1.57.0
 # ── ChromaDB — vector database client ────────────────────────────────────────
 chromadb==1.0.0
 
-# ── LlamaIndex — async workflow orchestration (Pillar 2) ─────────────────────
-llama-index-core==0.12.6
-
 # ── Pydantic — structured output schemas (Pillar 3) ──────────────────────────
 pydantic==2.10.4
 
-# ── Live price data (Layer 4) ─────────────────────────────────────────────────
-yfinance==0.2.51
+# ── Live price data+ news data (Layers 1 & 4) ─────────────────────────────────────────────────
+finnhub-python==2.4.27
 
 # ── Environment variables ─────────────────────────────────────────────────────
 python-dotenv==1.0.1
