@@ -57,6 +57,7 @@ from retrieval.workflow import retrieve_all, run_cross_portfolio_retrieval
 from synthesis.synthesizer import synthesize, synthesize_general
 from synthesis.schemas import QueryType
 from memory.session_store import get_history, append_turn, clear_session, session_count
+from api.graph import store_graph
 
 router  = APIRouter()
 _client = OpenAI(api_key=OPENAI_API_KEY)
@@ -380,6 +381,12 @@ async def query(request: QueryRequest):
             f"{output.narrative.conclusion}"
         )
         append_turn(session_id, request.question, answer_summary, ticker)
+        store_graph(
+            session_id,
+            [n.model_dump() for n in output.knowledge_graph.nodes],
+            [e.model_dump() for e in output.knowledge_graph.edges],
+            f"{ticker} — {output.narrative.summary[:60]}...",
+        )
 
         return QueryResponse(
             query_type      = query_type.value,
@@ -417,6 +424,12 @@ async def query(request: QueryRequest):
             f"{output.narrative.conclusion}"
         )
         append_turn(session_id, request.question, answer_summary, ticker=None)
+        store_graph(
+            session_id,
+            [n.model_dump() for n in output.knowledge_graph.nodes],
+            [e.model_dump() for e in output.knowledge_graph.edges],
+            f"Portfolio — {request.question[:60]}",
+        )
 
         return QueryResponse(
             query_type      = query_type.value,

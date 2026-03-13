@@ -23,6 +23,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from api.query import router as query_router
 from api.ingest import router as ingest_router
+from api.graph import router as graph_router
 
 
 # ── Lifespan ──────────────────────────────────────────────────────────────────
@@ -84,6 +85,7 @@ app.add_middleware(
 
 app.include_router(query_router,  prefix="/api")
 app.include_router(ingest_router, prefix="/api")
+app.include_router(graph_router,  prefix="/api")
 
 
 # ── Health check ──────────────────────────────────────────────────────────────
