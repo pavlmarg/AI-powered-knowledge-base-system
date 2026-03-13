@@ -382,10 +382,14 @@ async def query(request: QueryRequest):
         )
         append_turn(session_id, request.question, answer_summary, ticker)
         store_graph(
-            session_id,
-            [n.model_dump() for n in output.knowledge_graph.nodes],
-            [e.model_dump() for e in output.knowledge_graph.edges],
-            f"{ticker} — {output.narrative.summary[:60]}...",
+            session_id      = session_id,
+            nodes           = [n.model_dump() for n in output.knowledge_graph.nodes],
+            edges           = [e.model_dump() for e in output.knowledge_graph.edges],
+            title           = f"{ticker} Analysis",
+            summary         = output.narrative.summary,
+            risk_pct        = output.narrative.risk_percentage,
+            risk_label      = output.narrative.risk_level,
+            contradiction   = output.narrative.contradictions,
         )
 
         return QueryResponse(
@@ -425,10 +429,14 @@ async def query(request: QueryRequest):
         )
         append_turn(session_id, request.question, answer_summary, ticker=None)
         store_graph(
-            session_id,
-            [n.model_dump() for n in output.knowledge_graph.nodes],
-            [e.model_dump() for e in output.knowledge_graph.edges],
-            f"Portfolio — {request.question[:60]}",
+            session_id      = session_id,
+            nodes           = [n.model_dump() for n in output.knowledge_graph.nodes],
+            edges           = [e.model_dump() for e in output.knowledge_graph.edges],
+            title           = f"Portfolio Analysis",
+            summary         = output.narrative.portfolio_risk_summary if hasattr(output.narrative, "portfolio_risk_summary") else "",
+            risk_pct        = 0,
+            risk_label      = "",
+            contradiction   = "",
         )
 
         return QueryResponse(
