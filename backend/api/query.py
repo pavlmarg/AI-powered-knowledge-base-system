@@ -179,9 +179,22 @@ def _extract_ticker_llm(question: str) -> Optional[str]:
 
 The user asked: "{question}"
 
-Task: Is this question about ONE specific publicly traded company?
+Task: Does this question EXPLICITLY mention or clearly refer to ONE specific 
+publicly traded company BY NAME or TICKER SYMBOL?
+
 - If yes: return ONLY its stock ticker symbol. Example: MSFT
-- If no (comparative, ranking, general, or non-financial question): return NONE
+- If no: return NONE
+
+Return NONE for:
+- General investment questions: "What should I invest in?", "What is a good stock?"
+- Comparative questions: "Which stock is best?", "Compare tech stocks"
+- Market questions: "How is the market doing?", "What sectors are strong?"
+- Vague follow-ups with no company name: "Is that risky?", "Tell me more"
+  (these will be resolved via conversation history, not here)
+- Non-financial questions
+
+Return a TICKER only if the question contains a clear, unambiguous company 
+reference BY NAME (e.g. "Boeing", "Tesla", "Apple") or BY TICKER (e.g. "BA", "TSLA").
 
 Rules:
 - Return only a valid stock ticker (1-5 uppercase letters) or the word NONE
@@ -304,6 +317,26 @@ async def query(request: QueryRequest):
         if not ticker:
             ticker = _extract_ticker_llm(request.question)
             print(f"[Router] LLM extraction: {ticker}")
+
+        # ── Step 1b: History-based ticker resolution ──────────────────────────
+        # Only if regex + LLM both failed to find a ticker.
+        # Checks the immediately previous turn (last history entry):
+        #   - If last turn had a ticker (single-stock) → inherit it.
+        #     e.g. "Is that risk high?" after "What is Boeing doing?" → BA ✅
+        #   - If last turn had no ticker (cross-portfolio/general) → don't inherit.
+        #     e.g. "Is that risk high?" after "What should I invest in?" → portfolio ✅
+        #   This way all 3 scenarios work correctly:
+        #     Scenario 1: explicit ticker in question      → regex/LLM finds it
+        #     Scenario 2: follow-up on last single-stock   → inherited from history
+        #     Scenario 3: follow-up after portfolio query  → stays cross-portfolio
+        if not ticker and history:
+            last_turn = history[-1]   # most recent entry (always the assistant turn)
+            last_ticker = last_turn.get("ticker")
+            if last_ticker:
+                ticker = last_ticker
+                print(f"[Router] Ticker resolved from last turn history → {ticker}")
+            else:
+                print(f"[Router] Last turn had no ticker — not inheriting, routing to portfolio")
 
     # ── Step 2: Classify ──────────────────────────────────────────────────────
     query_type = _classify_query(request.question, ticker)
