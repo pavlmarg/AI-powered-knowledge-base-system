@@ -12,43 +12,54 @@ Why in-memory (not Redis/Postgres):
   no schema migrations, zero setup. The tradeoff is that history is lost
   on server restart, which is acceptable for a demo environment.
 
-  Upgrading to Redis later is a one-file change: replace the dict with
-  redis.get() / redis.set() calls using the same interface.
-
 Data structure per session:
   {
-    "session_id": [
-      {
-        "role"    : "user",
-        "content" : "What is Boeing's situation?",
-        "ticker"  : "BA",
-        "turn"    : 1,
-      },
-      {
-        "role"    : "assistant",
-        "content" : "Boeing's 10-K warns of... [summary]",
-        "ticker"  : "BA",
-        "turn"    : 1,
-      },
-      ...
-    ]
+    "session_id": {
+      "turns": [
+        {
+          "role"    : "user",
+          "content" : "Compare GME and NVIDIA",
+          "tickers" : ["GME", "NVDA"],   ← list (was single ticker)
+          "ticker"  : "GME",             ← backward-compat: first ticker
+          "turn"    : 1,
+        },
+        {
+          "role"    : "assistant",
+          "content" : "GME carries higher risk than NVDA due to...",
+          "tickers" : ["GME", "NVDA"],
+          "ticker"  : "GME",
+          "turn"    : 1,
+        },
+        ...
+      ],
+      "last_active": <timestamp>
+    }
   }
-
-The assistant turn stores a compact summary of the analysis
-(not the full JSON response) to keep the context window manageable.
 """
 
 import time
 from collections import defaultdict
-from typing import Optional
+from typing import Optional, List
 
 # ── Constants ─────────────────────────────────────────────────────────────────
-MAX_TURNS      = 10    # Keep last 10 Q+A pairs per session
-SESSION_TTL    = 3600  # Expire sessions after 1 hour of inactivity (seconds)
+MAX_TURNS   = 10      # Keep last 10 Q+A pairs per session
+SESSION_TTL = 3600    # Expire sessions after 1 hour of inactivity (seconds)
 
 # ── Store ─────────────────────────────────────────────────────────────────────
-# { session_id: {"turns": [...], "last_active": timestamp} }
 _store: dict = defaultdict(lambda: {"turns": [], "last_active": time.time()})
+
+
+# ── Internal helpers ──────────────────────────────────────────────────────────
+
+def _evict_expired() -> None:
+    """Remove sessions that have been inactive longer than SESSION_TTL."""
+    now     = time.time()
+    expired = [sid for sid, s in _store.items()
+               if now - s["last_active"] > SESSION_TTL]
+    for sid in expired:
+        del _store[sid]
+    if expired:
+        print(f"[SessionStore] Evicted {len(expired)} expired session(s).")
 
 
 # ── Public API ────────────────────────────────────────────────────────────────
@@ -65,37 +76,48 @@ def get_history(session_id: str) -> list[dict]:
     return session["turns"]
 
 
-def append_turn(session_id: str, question: str, answer_summary: str, ticker: Optional[str]) -> None:
+def append_turn(
+    session_id    : str,
+    question      : str,
+    answer_summary: str,
+    tickers       : List[str],
+    # backward-compat: old callers may still pass ticker= as a kwarg
+    ticker        : Optional[str] = None,
+) -> None:
     """
     Append a completed Q+A exchange to the session history.
-
-    Stores a compact summary of the answer rather than the full JSON
-    response — this keeps the context window manageable while still
-    giving the model enough context to answer follow-up questions.
 
     Args:
         session_id     : Unique session identifier from the frontend
         question       : The user's original question
         answer_summary : A 2-3 sentence plain-text summary of the analysis
-        ticker         : The ticker discussed, if any (for context)
+        tickers        : List of tickers discussed ([] for portfolio/general turns)
+        ticker         : Deprecated — ignored if `tickers` is provided
     """
     _evict_expired()
+
+    # Normalise: if called the old way with ticker= only, convert to list
+    if not tickers and ticker:
+        tickers = [ticker]
 
     session = _store[session_id]
     session["last_active"] = time.time()
 
-    turn_number = len(session["turns"]) // 2 + 1
+    turn_number   = len(session["turns"]) // 2 + 1
+    primary_ticker = tickers[0] if tickers else None
 
     session["turns"].append({
         "role"   : "user",
         "content": question,
-        "ticker" : ticker,
+        "tickers": tickers,
+        "ticker" : primary_ticker,   # backward-compat
         "turn"   : turn_number,
     })
     session["turns"].append({
         "role"   : "assistant",
         "content": answer_summary,
-        "ticker" : ticker,
+        "tickers": tickers,
+        "ticker" : primary_ticker,   # backward-compat
         "turn"   : turn_number,
     })
 
@@ -112,10 +134,10 @@ def format_history_for_prompt(history: list[dict]) -> str:
 
     Output format:
       [CONVERSATION HISTORY]
-      Turn 1 | User (BA): What is Boeing's situation?
-      Turn 1 | Assistant: Boeing's 10-K reveals serious quality control...
-      Turn 2 | User (BA): Is that CEO purchase unusual?
-      Turn 2 | Assistant: The CEO purchased 100K shares, which is...
+      Turn 1 | User [GME, NVDA]: Compare GME and NVIDIA
+      Turn 1 | Assistant [GME, NVDA]: GME carries higher risk...
+      Turn 2 | User [GME, NVDA]: Which one has more insider activity?
+      Turn 2 | Assistant [GME, NVDA]: ...
       [END HISTORY]
 
     Returns an empty string if history is empty.
@@ -126,10 +148,14 @@ def format_history_for_prompt(history: list[dict]) -> str:
     lines = ["[CONVERSATION HISTORY — use this context to answer follow-up questions]"]
     for entry in history:
         role    = entry["role"].capitalize()
-        ticker  = f" ({entry['ticker']})" if entry.get("ticker") else ""
+        tickers = entry.get("tickers") or []
+        # fall back to old-style single ticker field for legacy sessions
+        if not tickers and entry.get("ticker"):
+            tickers = [entry["ticker"]]
+        ticker_label = f" [{', '.join(tickers)}]" if tickers else ""
         turn    = entry.get("turn", "?")
         content = entry["content"]
-        lines.append(f"  Turn {turn} | {role}{ticker}: {content}")
+        lines.append(f"  Turn {turn} | {role}{ticker_label}: {content}")
     lines.append("[END CONVERSATION HISTORY]\n")
 
     return "\n".join(lines)
@@ -145,16 +171,3 @@ def session_count() -> int:
     """Return the number of active sessions (for monitoring)."""
     _evict_expired()
     return len(_store)
-
-
-# ── Internal helpers ──────────────────────────────────────────────────────────
-
-def _evict_expired() -> None:
-    """Remove sessions that have been inactive for more than SESSION_TTL seconds."""
-    now     = time.time()
-    expired = [
-        sid for sid, data in _store.items()
-        if now - data["last_active"] > SESSION_TTL
-    ]
-    for sid in expired:
-        del _store[sid]

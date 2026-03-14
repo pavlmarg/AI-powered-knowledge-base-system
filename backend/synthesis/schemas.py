@@ -4,33 +4,17 @@ synthesis/schemas.py
 Pydantic models that define the guaranteed output structure of the
 synthesis engine.
 
-Layer 3 change:
-  AnalysisNarrative.insider_activity → AnalysisNarrative.sec_filings_analysis
-
-  The new field carries a richer analysis: instead of summarising a few
-  insider buy/sell transactions, the model now synthesises official SEC
-  language from 10-K risk factors, 10-Q quarterly results, and 8-K events.
-
 Output structures — two paths:
 
   Path A: AnalysisOutput  (single-stock deep dive)
   ─────────────────────────────────────────────────
-  Part 1: AnalysisNarrative — structured CoT breakdown:
-    - summary, news_analysis, social_sentiment, reddit_buzz_signal,
-      sec_filings_analysis, price_context, contradictions, conclusion, risk_level
+  Part 1: AnalysisNarrative — structured CoT breakdown
+  Part 2: KnowledgeGraph — React Flow compatible graph
 
-  Part 2: KnowledgeGraph — React Flow compatible:
-    - nodes : entities (Company, Person, Sentiment, Event, Price, Filing)
-    - edges : relationships between entities
-
-  Path B: GeneralAnalysisOutput  (cross-portfolio / general questions)
-  ──────────────────────────────────────────────────────────────────────
-  Used when no specific ticker is identified. Returns:
-    - answer         : direct response to the question
-    - methodology    : how the answer was derived
-    - ticker_insights: per-ticker mini-summaries relevant to the question
-    - top_ticker     : the most relevant ticker if one stands out
-    - knowledge_graph: a comparative graph across multiple companies
+  Path B: GeneralAnalysisOutput  (cross-portfolio / comparison / general)
+  ─────────────────────────────────────────────────────────────────────────
+  Used for CROSS_PORTFOLIO, COMPARISON, and GENERAL query types.
+  Returns a comparative narrative + multi-company knowledge graph.
 """
 
 from pydantic import BaseModel, Field
@@ -60,285 +44,110 @@ class NodeType(str, Enum):
     SENTIMENT = "Sentiment"
     EVENT     = "Event"
     PRICE     = "Price"
-    FILING    = "Filing"   # New node type for SEC filings
+    FILING    = "Filing"
 
 
 class QueryType(str, Enum):
-    SINGLE_STOCK    = "single_stock"      # e.g. "Should I buy GME?"
-    CROSS_PORTFOLIO = "cross_portfolio"   # e.g. "Which stock has the most bearish insiders?"
-    GENERAL         = "general"           # e.g. "What is insider trading?"
-    OUT_OF_SCOPE    = "out_of_scope"      # e.g. "Is life beautiful?" — not a financial question
+    SINGLE_STOCK    = "single_stock"
+    # NEW: 2+ named tickers → focused comparison (not full portfolio fan-out)
+    COMPARISON      = "comparison"
+    CROSS_PORTFOLIO = "cross_portfolio"
+    GENERAL         = "general"
+    OUT_OF_SCOPE    = "out_of_scope"
 
 
 # ── Knowledge Graph Models ────────────────────────────────────────────────────
 
 class GraphNode(BaseModel):
-    """
-    A node in the knowledge graph.
-    Maps directly to React Flow's node schema.
-    """
-    id    : str = Field(
-        ...,
-        description="Unique identifier. Use the entity name e.g. 'GME', 'CEO_Ryan_Cohen', '10K_Risk'."
-    )
-    label : str = Field(
-        ...,
-        description="Human-readable label displayed on the node in the UI."
-    )
-    type  : NodeType = Field(
-        ...,
-        description="Category of the node: Company, Person, Sentiment, Event, Price, or Filing."
-    )
-    detail: str = Field(
-        ...,
-        description="One sentence describing this entity's relevance e.g. '10-K warns of supply chain risk'."
-    )
+    id     : str      = Field(..., description="Unique identifier e.g. 'GME', 'CEO_Ryan_Cohen', '10K_Risk'.")
+    label  : str      = Field(..., description="Human-readable label displayed on the node in the UI.")
+    type   : NodeType = Field(..., description="Node category — drives colour/icon in the frontend.")
+    detail : str      = Field(..., description="One sentence describing this entity's relevance e.g. '10-K warns of supply chain risk'.")
 
 
 class GraphEdge(BaseModel):
-    """
-    A directed edge connecting two nodes in the knowledge graph.
-    Maps directly to React Flow's edge schema.
-    """
-    id    : str = Field(
-        ...,
-        description="Unique identifier for this edge e.g. 'edge_10k_gme'."
-    )
-    source: str = Field(
-        ...,
-        description="ID of the origin node. MUST exactly match an existing GraphNode id."
-    )
-    target: str = Field(
-        ...,
-        description="ID of the destination node. MUST exactly match an existing GraphNode id."
-    )
-    label : str = Field(
-        ...,
-        description="Relationship label on the edge e.g. 'DISCLOSES_RISK', 'REPORTS_REVENUE', 'WARNS_OF'."
-    )
+    id     : str = Field(..., description="Unique edge id e.g. 'GME_to_CEO'.")
+    source : str = Field(..., description="Source node id.")
+    target : str = Field(..., description="Target node id.")
+    label  : str = Field(..., description="Relationship label e.g. 'DISCLOSES_RISK', 'REPORTS_REVENUE', 'WARNS_OF'.")
 
 
 class KnowledgeGraph(BaseModel):
-    """Complete knowledge graph with nodes and edges."""
-    nodes: List[GraphNode] = Field(
-        ...,
-        description="List of entity nodes. Must include the company, key SEC filing nodes, sentiment, and price."
-    )
-    edges: List[GraphEdge] = Field(
-        ...,
-        description="List of directed relationships between nodes."
-    )
+    nodes : List[GraphNode] = Field(..., description="List of entity nodes.")
+    edges : List[GraphEdge] = Field(..., description="List of relationship edges.")
 
 
-
-
-# ── Risk Score Model ──────────────────────────────────────────────────────────
+# ── Risk Score ────────────────────────────────────────────────────────────────
 
 class RiskScore(BaseModel):
-    """
-    A single unified Risk Percentage (0-100%) for the stock.
+    risk_percentage  : int   = Field(..., ge=0, le=100)
+    risk_label       : str   = Field(...)
+    contradiction_detected: bool = Field(...)
+    scoring_rationale: str   = Field(...)
 
-    Designed to be shown directly in the UI as a risk gauge/meter.
 
-    Calculation logic (performed by the LLM):
-
-      Step 1 — Base risk from fundamentals:
-        LOW       → 15
-        MEDIUM    → 35
-        HIGH      → 60
-        VERY_HIGH → 80
-
-      Step 2 — Add contradiction bonuses (sources disagreeing = more risk):
-        +15  if SEC filings sentiment conflicts with social/Reddit sentiment
-             (official filings warn of problems retail investors are ignoring)
-        +10  if Reddit momentum conflicts with news sentiment
-             (e.g. Reddit RISING/BULLISH but news coverage is negative)
-        +10  if price movement conflicts with SEC fundamental signals
-             (price rising while filings warn of serious headwinds)
-        +5   if social sentiment conflicts with news sentiment
-
-      Step 3 — Clamp to [0, 100]
-
-    The key insight: contradictions between sources mean higher uncertainty,
-    and higher uncertainty = higher risk for any position taken.
-
-    risk_label maps the percentage to a human-readable label:
-      0-25   → "Low Risk"
-      26-50  → "Moderate Risk"
-      51-75  → "High Risk"
-      76-100 → "Very High Risk"
-    """
-    risk_percentage : int = Field(
-        ...,
-        ge=0, le=100,
-        description=(
-            "Overall risk score from 0 to 100. "
-            "Combines fundamental risk level with contradiction penalties. "
-            "Higher when sources disagree with each other."
-        )
-    )
-    risk_label : str = Field(
-        ...,
-        description="Human-readable label: 'Low Risk', 'Moderate Risk', 'High Risk', or 'Very High Risk'."
-    )
-    dominant_risk_factor : str = Field(
-        ...,
-        description=(
-            "One sentence naming the single biggest contributor to the risk score. "
-            "e.g. 'SEC 10-K warns of margin compression while Reddit sentiment is strongly bullish — "
-            "sources in maximum disagreement.' or 'All signals align bearish with high conviction.'"
-        )
-    )
-
-# ── Narrative Analysis Model (Single-Stock) ───────────────────────────────────
+# ── Single-Stock Narrative ────────────────────────────────────────────────────
 
 class AnalysisNarrative(BaseModel):
-    """
-    Structured Chain-of-Thought financial analysis.
-    Each field represents one reasoning step.
-    """
-    summary: str = Field(
-        ...,
-        description="One sentence verdict on the stock situation e.g. 'TSLA's 10-K warns of margin pressure while Reddit sentiment is strongly bullish — a key contradiction.'"
-    )
-    news_analysis: str = Field(
-        ...,
-        description="2-3 sentence analysis of what the news articles reveal about this company."
-    )
-    social_sentiment: str = Field(
-        ...,
-        description="2-3 sentence analysis of the social media sentiment from posts. Note dominant emotion and any extreme views. If no posts available, state that."
-    )
-    reddit_buzz_signal: str = Field(
-        ...,
-        description=(
-            "1-2 sentence analysis of the Reddit buzz data (Layer 5 — ApeWisdom). "
-            "State the rank, mention count, upvote count, and trend direction (RISING/FALLING/STABLE/NEW ENTRY). "
-            "Interpret what this momentum means e.g. 'MSFT is Rank #9 on Reddit (FALLING from #8), with 64 mentions "
-            "and 165 upvotes — modest retail interest, slightly cooling.' "
-            "If no Reddit buzz data is available, explicitly state: 'No Reddit buzz data available for this ticker.'"
-        )
-    )
-    sec_filings_analysis: str = Field(
-        ...,
-        description=(
-            "3-4 sentence analysis of what the SEC filings reveal. "
-            "Identify the filing type (10-K / 10-Q / 8-K) and date. "
-            "Quote or closely paraphrase the most significant risk factor or management statement. "
-            "Note any material events from 8-K filings (earnings, M&A, leadership changes). "
-            "If no SEC filings are available, state that explicitly."
-        )
-    )
-    price_context: str = Field(
-        ...,
-        description="1-2 sentence analysis of what the current price and daily movement signals."
-    )
-    contradictions: str = Field(
-        ...,
-        description=(
-            "The most important conflict between signals — especially between SEC official language "
-            "and retail/social sentiment. "
-            "e.g. '10-K warns of severe competition and margin compression, yet Reddit is RISING with bullish posts.' "
-            "Also consider: SEC risk factors vs news, 8-K material events vs social sentiment. "
-            "This is the key insight."
-        )
-    )
-    conclusion: str = Field(
-        ...,
-        description="2-3 sentence final assessment synthesizing all signals including SEC filings into a coherent view."
-    )
-    risk_level: RiskLevel = Field(
-        ...,
-        description="Overall risk assessment: LOW, MEDIUM, HIGH, or VERY_HIGH."
-    )
-    risk_percentage : int = Field(
-        ...,
-        ge=0, le=100,
-        description=(
-            "Overall risk percentage (0-100). Mirrors RiskScore.risk_percentage "
-            "for easy frontend access. Higher when sources contradict each other."
-        )
-    )
+    summary             : str          = Field(..., description="2-3 sentence executive summary.")
+    news_analysis       : str          = Field(..., description="Analysis of recent news signals.")
+    social_sentiment    : str          = Field(..., description="Analysis of social/Twitter signals.")
+    reddit_buzz_signal  : str          = Field(..., description="Analysis of Reddit momentum signal.")
+    sec_filings_analysis: str          = Field(..., description="Analysis of SEC filings (10-K/10-Q/8-K).")
+    price_context       : str          = Field(..., description="Analysis of recent price action.")
+    contradictions      : str          = Field(..., description="Conflicts across data sources, if any.")
+    conclusion          : str          = Field(..., description="2-3 sentence synthesised conclusion.")
+    risk_level          : RiskLevel    = Field(..., description="Overall risk classification.")
+    sentiment_label     : SentimentLabel = Field(..., description="Overall market sentiment.")
+    risk_percentage     : int          = Field(..., ge=0, le=100, description="Overall risk 0-100.")
 
-
-# ── Single-Stock Final Output ─────────────────────────────────────────────────
 
 class AnalysisOutput(BaseModel):
-    """
-    The complete output of the synthesis engine for a single-stock query.
-    Contains the narrative analysis, quantified scoring, and the knowledge graph.
-    This is what the FastAPI endpoint returns to the frontend.
-    """
     ticker          : str               = Field(..., description="The stock ticker analysed.")
     narrative       : AnalysisNarrative = Field(..., description="Structured CoT analysis.")
-    risk_score      : RiskScore          = Field(..., description="Unified risk percentage with contradiction-aware scoring.")
+    risk_score      : RiskScore         = Field(..., description="Unified risk score.")
     knowledge_graph : KnowledgeGraph    = Field(..., description="React Flow compatible graph.")
 
 
-# ── Cross-Portfolio / General Analysis Models ─────────────────────────────────
+# ── Cross-Portfolio / Comparison / General Models ─────────────────────────────
 
 class TickerInsight(BaseModel):
-    """
-    A mini-summary for one ticker within a cross-portfolio response.
-    Used when the user asks a comparative or general question.
-    """
     ticker          : str            = Field(..., description="Stock ticker e.g. 'GME'.")
-    relevance_score : float          = Field(..., description="0-1 score of how relevant this ticker is to the question.")
-    summary         : str            = Field(..., description="1-2 sentence insight about this ticker relevant to the question.")
-    sentiment_label : SentimentLabel = Field(..., description="Overall sentiment for this ticker combining all available signals.")
+    relevance_score : float          = Field(..., description="0-1 relevance to the question.")
+    summary         : str            = Field(..., description="1-2 sentence insight for this ticker.")
+    sentiment_label : SentimentLabel = Field(..., description="Overall sentiment for this ticker.")
     risk_level      : RiskLevel      = Field(..., description="Risk level for this ticker.")
-    risk_percentage : int            = Field(
-        ...,
-        ge=0, le=100,
-        description=(
-            "Risk percentage for this specific ticker (0-100). "
-            "Use the same scoring logic as single-stock: "
-            "base from risk_level (LOW=15, MEDIUM=35, HIGH=60, VERY_HIGH=80) "
-            "plus contradiction bonuses (+15 SEC vs social, +10 Reddit vs news, "
-            "+10 price vs SEC, +5 social vs news). Clamp to [0, 100]."
-        )
-    )
-    key_signal      : str            = Field(..., description="The single most important signal for this ticker — can now reference SEC filings e.g. '10-K discloses $2B debt refinancing risk' or 'CEO sold 5M shares'.")
+    risk_percentage : int            = Field(..., ge=0, le=100, description="Risk 0-100 for this ticker.")
+    key_signal      : str            = Field(..., description="The single most important signal for this ticker.")
 
 
 class GeneralAnalysisNarrative(BaseModel):
-    """
-    Structured response for cross-portfolio or general financial questions.
-    """
-    answer: str = Field(
-        ...,
-        description="Direct answer to the user's question in 2-4 sentences."
-    )
-    methodology: str = Field(
-        ...,
-        description="1-2 sentences explaining how this answer was derived from the data layers."
-    )
+    answer: str = Field(..., description="Direct answer to the user's question in 2-4 sentences.")
+    methodology: str = Field(..., description="1-2 sentences explaining how this answer was derived.")
     ticker_insights: List[TickerInsight] = Field(
         ...,
-        description="Ranked list of the most relevant tickers to this question, most relevant first. Include all tickers with meaningful signal."
+        description=(
+            "Ranked list of the most relevant tickers to this question, most relevant first. "
+            "For COMPARISON queries, this MUST include an entry for every ticker in the comparison."
+        )
     )
     top_ticker: Optional[str] = Field(
         default=None,
-        description="The single most relevant ticker if one clearly stands out, else null."
+        description="The single most relevant/best ticker if one clearly stands out, else null."
     )
-    conclusion: str = Field(
-        ...,
-        description="2-3 sentence synthesized conclusion across all analysed data."
-    )
+    conclusion: str = Field(..., description="2-3 sentence synthesised conclusion across all analysed data.")
     portfolio_risk_summary: str = Field(
         ...,
         description=(
             "1-2 sentence summary of the overall risk picture across all tickers. "
-            "e.g. 'GME (87%) and PLTR (72%) carry the highest risk due to SEC-vs-Reddit contradictions. "
-            "JPM (32%) is the most stable with aligned signals across all sources.'"
+            "e.g. 'GME (87%) carries the highest risk. NVDA (32%) is the most stable.'"
         )
     )
 
 
 class GeneralAnalysisOutput(BaseModel):
     """
-    The complete output for cross-portfolio or general questions.
-    Returns a comparative narrative + a multi-company knowledge graph.
+    The complete output for cross-portfolio, comparison, or general questions.
     """
     query_type      : QueryType                = Field(..., description="Classification of the query type.")
     narrative       : GeneralAnalysisNarrative = Field(..., description="Structured comparative analysis.")

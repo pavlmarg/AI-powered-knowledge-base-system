@@ -20,23 +20,16 @@ Three entry points:
     - Layer 4: Live market price   (Finnhub live API)
     - Layer 5: Reddit buzz         (ChromaDB — ApeWisdom, refreshed daily)
 
-  run_cross_portfolio_retrieval(query)
-  ─────────────────────────────────────
-  Fans out retrieve_all() across all SEED_TICKERS simultaneously.
-  Used for cross-portfolio and general questions.
-
-Layer 3 change:
-  ingest_insider / retrieve_insider → ingest_sec / retrieve_sec_filings
-  The static JSON with 50 fake trades is replaced by live SEC EDGAR filings.
-
-Issue 2 fix:
-  Replaced all asyncio.get_event_loop().run_in_executor() calls with
-  asyncio.to_thread() — the modern Python 3.10+ idiomatic pattern.
-  get_event_loop() is deprecated inside coroutines and raises
-  DeprecationWarning in Python 3.12+.
+  run_cross_portfolio_retrieval(query, tickers_override=None)
+  ────────────────────────────────────────────────────────────
+  Fans out retrieve_all() across either:
+    - tickers_override (list) — for COMPARISON queries with named tickers
+    - all SEED_TICKERS        — for CROSS_PORTFOLIO / GENERAL queries
 """
 
 import asyncio
+from typing import Optional, List
+
 from retrieval.retriever import retrieve_news, retrieve_social, retrieve_sec_filings, retrieve_reddit_buzz
 from retrieval.finnhub_tool import get_live_price
 from ingestion.ingest_news import ingest_news_if_stale
@@ -52,13 +45,7 @@ from core.config import SEED_TICKERS
 async def seed_on_startup() -> None:
     """
     Ensure all SEED_TICKERS have fresh data across all layers in ChromaDB.
-
     Called from FastAPI's startup event (main.py lifespan hook).
-
-    Layer 1 (News)        — re-ingested if cache is stale (TTL: 7 days)
-    Layer 2 (Social)      — ingested once on cold start; skipped on warm restart
-    Layer 3 (SEC filings) — re-ingested if cache is stale (TTL: 30 days)
-    Layer 5 (Reddit Buzz) — re-ingested if cache is stale (TTL: 1 day)
     """
     # Layer 2 — Social: ingest once if collection is empty
     social_col = get_social_collection()
@@ -98,29 +85,18 @@ def ingest_sec_for_ticker_all_seeds() -> None:
 # ── Cache freshness checks ────────────────────────────────────────────────────
 
 async def _ensure_news_fresh(ticker: str) -> None:
-    """
-    Before retrieval, check if news cache is stale and re-ingest if needed.
-    This is what makes any new ticker work automatically on first query.
-    """
     count = await asyncio.to_thread(ingest_news_if_stale, ticker)
     if count > 0:
         print(f"[Workflow] 🔄 On-demand news ingestion: {count} new articles for {ticker}")
 
 
 async def _ensure_reddit_buzz_fresh(ticker: str) -> None:
-    """
-    Before retrieval, check if Reddit buzz cache is stale and re-ingest if needed.
-    """
     count = await asyncio.to_thread(ingest_reddit_buzz_if_stale, ticker)
     if count > 0:
         print(f"[Workflow] 🔄 On-demand Reddit buzz ingestion for {ticker}")
 
 
 async def _ensure_sec_fresh(ticker: str) -> None:
-    """
-    Before retrieval, check if SEC filings cache is stale and re-ingest if needed.
-    TTL is 30 days — filings don't change often, but we want to catch new 10-Qs.
-    """
     count = await asyncio.to_thread(ingest_sec_if_stale, ticker)
     if count > 0:
         print(f"[Workflow] 🔄 On-demand SEC ingestion: {count} new chunks for {ticker}")
@@ -186,7 +162,7 @@ async def run_parallel_retrieval(ticker: str, query: str) -> dict:
         "query"       : query,
         "news"        : news,
         "social"      : social,
-        "sec_filings" : sec_filings,   # key renamed from "insider"
+        "sec_filings" : sec_filings,
         "price"       : price,
         "reddit_buzz" : reddit_buzz,
     }
@@ -200,21 +176,32 @@ async def retrieve_all(ticker: str, query: str) -> dict:
     return await run_parallel_retrieval(ticker, query)
 
 
-# ── Cross-portfolio retrieval ─────────────────────────────────────────────────
+# ── Cross-portfolio / Comparison retrieval ────────────────────────────────────
 
-async def run_cross_portfolio_retrieval(query: str) -> list[dict]:
+async def run_cross_portfolio_retrieval(
+    query: str,
+    tickers_override: Optional[List[str]] = None,
+) -> list[dict]:
     """
-    Fan out retrieve_all() across all SEED_TICKERS simultaneously.
+    Fan out retrieve_all() across a set of tickers simultaneously.
 
-    Used for cross-portfolio and general questions where no specific
-    ticker was identified. All 10 retrievals run concurrently —
-    total latency ~= one single retrieval.
+    Args:
+        query            : The user's natural language question.
+        tickers_override : If provided, retrieve only these specific tickers
+                           (used for COMPARISON queries like "compare GME and NVDA").
+                           If None, falls back to all SEED_TICKERS (cross-portfolio).
+
+    Total latency ≈ one single retrieval regardless of ticker count,
+    because all retrievals run concurrently.
     """
-    print(f"\n[Workflow] Cross-portfolio retrieval across {len(SEED_TICKERS)} tickers...")
+    target_tickers = sorted(tickers_override) if tickers_override else sorted(SEED_TICKERS)
+    scope_label    = f"comparison ({', '.join(target_tickers)})" if tickers_override else f"full portfolio ({len(target_tickers)} tickers)"
+
+    print(f"\n[Workflow] Cross-portfolio retrieval — scope: {scope_label}")
 
     contexts = await asyncio.gather(*[
         run_parallel_retrieval(ticker, query)
-        for ticker in sorted(SEED_TICKERS)
+        for ticker in target_tickers
     ])
 
     total_news   = sum(len(c["news"])         for c in contexts)
@@ -222,7 +209,7 @@ async def run_cross_portfolio_retrieval(query: str) -> list[dict]:
     total_sec    = sum(len(c["sec_filings"])  for c in contexts)
     total_reddit = sum(len(c["reddit_buzz"])  for c in contexts)
 
-    print(f"[Workflow] ✅ Cross-portfolio complete.")
+    print(f"[Workflow] ✅ Retrieval complete.")
     print(f"  Tickers     : {[c['ticker'] for c in contexts]}")
     print(f"  News        : {total_news} total")
     print(f"  Social      : {total_social} total")
@@ -243,7 +230,17 @@ if __name__ == "__main__":
           f"SEC: {len(context['sec_filings'])} | Reddit: {len(context['reddit_buzz'])}")
 
     print("\n" + "=" * 55)
-    print("  [TEST B] Cross-portfolio retrieval")
+    print("  [TEST B] Comparison retrieval (GME vs NVDA)")
+    print("=" * 55)
+    contexts = asyncio.run(
+        run_cross_portfolio_retrieval("Compare GME and NVDA", tickers_override=["GME", "NVDA"])
+    )
+    for c in contexts:
+        print(f"  [{c['ticker']}] news={len(c['news'])} social={len(c['social'])} "
+              f"sec={len(c['sec_filings'])} reddit={len(c['reddit_buzz'])}")
+
+    print("\n" + "=" * 55)
+    print("  [TEST C] Full cross-portfolio retrieval")
     print("=" * 55)
     contexts = asyncio.run(run_cross_portfolio_retrieval("Which stocks have the most SEC risk disclosures?"))
     for c in contexts:
