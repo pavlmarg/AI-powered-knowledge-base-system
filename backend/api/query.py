@@ -3,50 +3,48 @@ api/query.py
 ------------
 POST /api/query — the main endpoint of the Financial RAG system.
 
-Changes in this version:
+Changes in this version (multi-ticker + follow-up fix):
 
-  1. Conversation memory (session-based)
-     ─────────────────────────────────────
-     Each request carries an optional session_id. The system loads
-     the conversation history for that session and prepends it to the
-     synthesis prompt, enabling follow-up questions like:
-       "You mentioned Boeing's 10-K warned of supply issues — is that new?"
-     History is stored in-memory (memory/session_store.py), last 10 turns,
-     TTL 1 hour. Zero extra dependencies.
+  1. Multi-ticker extraction (regex + LLM)
+     ──────────────────────────────────────
+     All extraction functions now return List[str] instead of Optional[str].
+     "Compare GME and NVIDIA" → ["GME", "NVDA"]
+     "What is Boeing doing?"  → ["BA"]
 
-  2. OUT_OF_SCOPE routing
-     ──────────────────────
-     Non-financial questions ("Is life beautiful?") are caught by the
-     classifier and returned immediately with a polite message —
-     no retrieval or synthesis is triggered.
+  2. COMPARISON query type
+     ───────────────────────
+     When 2+ specific tickers are detected the query is routed as
+     COMPARISON (treated as a focused cross-portfolio run over only
+     those tickers, NOT the full SEED_TICKERS fan-out).
 
-  3. Dynamic ticker support
-     ────────────────────────
-     Any valid stock ticker is accepted. The system auto-ingests on
-     first query via LLM-based ticker resolution (3-stage pipeline).
-
-  4. Query routing — four paths
+  3. Follow-up question handling
      ────────────────────────────
-     SINGLE_STOCK    → single-stock deep dive (any ticker)
-     CROSS_PORTFOLIO → fan-out across SEED_TICKERS
-     GENERAL         → fan-out across SEED_TICKERS with broader framing
-     OUT_OF_SCOPE    → immediate return, no retrieval
+     Session history stores a tickers list per turn.
+     Follow-ups inherit the tickers list from the previous turn so
+     "which one has more risk?" after "compare GME and NVIDIA"
+     correctly runs a 2-ticker comparison, not a single-stock query.
+
+  4. OUT_OF_SCOPE routing preserved
+     ──────────────────────────────
+     Non-financial questions are caught before any retrieval and
+     returned immediately with a polite message.
 
 Request body:
   {
-    "question"   : "What is Boeing's outlook?",
-    "ticker"     : null,           ← optional, auto-resolved
+    "question"   : "Compare GME and NVIDIA",
+    "tickers"    : null,           ← optional list, auto-resolved
     "session_id" : "uuid-here"     ← optional, omit for new session
   }
 
 Response always includes:
   session_id  — persist this on the frontend for follow-up questions
   turn_number — which turn in the conversation this is
+  tickers     — list of tickers involved (empty for general/OOS)
 """
 
 import re
 import uuid
-from typing import Optional
+from typing import Optional, List
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
@@ -71,12 +69,23 @@ class QueryRequest(BaseModel):
         min_length=3,
         max_length=500,
         description="Natural language question about any stock or the overall market.",
-        example="What is Microsoft doing in the AI space right now?"
+        example="Compare GME and NVIDIA",
     )
+    tickers: Optional[List[str]] = Field(
+        default=None,
+        description=(
+            "Optional explicit ticker list e.g. ['GME', 'NVDA']. "
+            "Auto-resolved from the question if omitted. "
+            "Single-element list = single-stock deep dive. "
+            "Multi-element list = comparison / cross-portfolio."
+        ),
+        example=["GME", "NVDA"],
+    )
+    # Keep backward-compat: old clients may still send a single ticker string
     ticker: Optional[str] = Field(
         default=None,
-        description="Optional ticker e.g. 'MSFT'. Auto-resolved from question if omitted.",
-        example="MSFT"
+        description="Deprecated — prefer `tickers`. If both are provided, `tickers` wins.",
+        example="GME",
     )
     session_id: Optional[str] = Field(
         default=None,
@@ -85,52 +94,61 @@ class QueryRequest(BaseModel):
             "If omitted, a new session is created and returned in the response. "
             "Pass the same session_id across turns to enable follow-up questions."
         ),
-        example="550e8400-e29b-41d4-a716-446655440000"
+        example="550e8400-e29b-41d4-a716-446655440000",
     )
 
 
 class QueryResponse(BaseModel):
     query_type     : str
-    ticker         : Optional[str]
+    tickers        : List[str]          # all tickers involved (empty for general/OOS)
+    ticker         : Optional[str]      # backward-compat: first ticker or None
     narrative      : dict
     knowledge_graph: dict
     price          : Optional[dict]
     retrieved_docs : Optional[dict]
-    session_id     : str   # Always returned — frontend should persist this
-    turn_number    : int   # Which turn in the conversation this is
+    session_id     : str
+    turn_number    : int
 
 
-# ── Stage 1: Fast Regex Ticker Extraction ─────────────────────────────────────
+# ── Stage 1: Fast Regex Multi-Ticker Extraction ───────────────────────────────
 
-def _extract_ticker_regex(question: str) -> Optional[str]:
+def _extract_tickers_regex(question: str) -> List[str]:
     """
-    Fast regex-based ticker extraction — zero API cost.
+    Fast regex-based multi-ticker extraction — zero API cost.
 
     Looks for:
-      1. Explicit cashtag:  $GME
-      2. Uppercase word:    GME  (2-5 chars)
-      3. Company name:      GameStop, Tesla, Apple...
-    """
-    # 1. Cashtag
-    cashtags = re.findall(r"\$([A-Z]{1,5})", question)
-    if cashtags:
-        return cashtags[0]
+      1. Explicit cashtags:  $GME  $NVDA
+      2. Uppercase words:    GME  NVDA  (2-5 chars, not stopwords)
+      3. Company name map:   GameStop → GME, Nvidia → NVDA …
 
-    # 2. Uppercase ticker word
-    words = re.findall(r"\b([A-Z]{2,5})\b", question)
+    Returns a deduplicated list preserving first-seen order.
+    """
+    found: list[str] = []
+    seen:  set[str]  = set()
+
+    def _add(t: str) -> None:
+        if t and t not in seen:
+            seen.add(t)
+            found.append(t)
+
+    # 1. Cashtags — most explicit signal
+    for t in re.findall(r"\$([A-Z]{1,5})", question):
+        _add(t)
+
+    # 2. Uppercase ticker words
     english_stopwords = {
         "I", "A", "AN", "THE", "IS", "ARE", "WAS", "BE",
         "IN", "ON", "AT", "TO", "DO", "GO", "OR", "AND",
         "FOR", "NOT", "BUT", "ALL", "MY", "WE", "IT",
         "US", "CEO", "CFO", "COO", "IPO", "ETF", "AI",
         "EV", "GDP", "CPI", "FED", "SEC", "NYSE", "NASDAQ",
-        "RAG", "LLM", "API", "UI", "UX",
+        "RAG", "LLM", "API", "UI", "UX", "VS", "VS.",
     }
-    for word in words:
+    for word in re.findall(r"\b([A-Z]{2,5})\b", question):
         if word not in english_stopwords:
-            return word
+            _add(word)
 
-    # 3. Company name mapping
+    # 3. Company name mapping (case-insensitive)
     name_map = {
         "gamestop"       : "GME",
         "game stop"      : "GME",
@@ -160,100 +178,107 @@ def _extract_ticker_regex(question: str) -> Optional[str]:
         "uber"           : "UBER",
         "airbnb"         : "ABNB",
     }
-    question_lower = question.lower()
-    for name, ticker in name_map.items():
-        if name in question_lower:
-            return ticker
+    q_lower = question.lower()
+    for name, t in name_map.items():
+        if name in q_lower:
+            _add(t)
 
-    return None
+    return found
 
 
-# ── Stage 2: LLM Ticker Resolution ───────────────────────────────────────────
+# ── Stage 2: LLM Multi-Ticker Resolution ─────────────────────────────────────
 
-def _extract_ticker_llm(question: str) -> Optional[str]:
+def _extract_tickers_llm(question: str) -> List[str]:
     """
     LLM fallback for freeform questions where regex found nothing.
-    Uses gpt-4.1 to identify if the question is about one specific
-    publicly traded company and returns its ticker.
+
+    Returns a list of tickers explicitly mentioned/implied.
+    Returns [] for general / market questions / OOS questions.
     """
     prompt = f"""You are a financial ticker resolver.
 
 The user asked: "{question}"
 
-Task: Does this question EXPLICITLY mention or clearly refer to ONE specific 
-publicly traded company BY NAME or TICKER SYMBOL?
-
-- If yes: return ONLY its stock ticker symbol. Example: MSFT
-- If no: return NONE
-
-Return NONE for:
-- General investment questions: "What should I invest in?", "What is a good stock?"
-- Comparative questions: "Which stock is best?", "Compare tech stocks"
-- Market questions: "How is the market doing?", "What sectors are strong?"
-- Vague follow-ups with no company name: "Is that risky?", "Tell me more"
-  (these will be resolved via conversation history, not here)
-- Non-financial questions
-
-Return a TICKER only if the question contains a clear, unambiguous company 
-reference BY NAME (e.g. "Boeing", "Tesla", "Apple") or BY TICKER (e.g. "BA", "TSLA").
+Task: Identify ALL specific publicly traded companies explicitly mentioned or 
+clearly referred to in this question BY NAME or BY TICKER SYMBOL.
 
 Rules:
-- Return only a valid stock ticker (1-5 uppercase letters) or the word NONE
-- No explanation, punctuation, or other text"""
+- Return a comma-separated list of valid stock tickers (1-5 uppercase letters each).
+- Return NONE if the question does NOT mention any specific company.
+- Return NONE for general investment questions, market questions, and non-financial questions.
+- Return NONE for vague follow-ups like "Is that risky?" or "Tell me more" that 
+  contain no company reference (context will be resolved from conversation history).
+
+Examples:
+  "Compare GME and Nvidia"          → GME,NVDA
+  "What is Boeing's outlook?"       → BA
+  "Should I buy Tesla or Apple?"    → TSLA,AAPL
+  "How is the market doing?"        → NONE
+  "What is insider trading?"        → NONE
+  "Tell me a joke"                  → NONE
+
+Return ONLY the comma-separated tickers or NONE. No explanation."""
 
     try:
         response = _client.chat.completions.create(
             model=SYNTHESIS_MODEL,
             messages=[{"role": "user", "content": prompt}],
             temperature=0,
-            max_tokens=10,
+            max_tokens=30,
         )
         result = response.choices[0].message.content.strip().upper()
-        print(f"[Router] LLM ticker resolution → {result}")
+        print(f"[Router] LLM ticker resolution → {result!r}")
 
-        if result == "NONE" or not result or len(result) > 5:
-            return None
-        if not result.isalpha():
-            return None
-        return result
+        if result == "NONE" or not result:
+            return []
+
+        tickers = [t.strip() for t in result.split(",")]
+        valid   = [t for t in tickers if t.isalpha() and 1 <= len(t) <= 5]
+        return valid
 
     except Exception as e:
         print(f"[Router] LLM ticker resolution failed: {e}")
-        return None
+        return []
 
 
 # ── Query Classifier ──────────────────────────────────────────────────────────
 
-def _classify_query(question: str, ticker: Optional[str]) -> QueryType:
+def _classify_query(question: str, tickers: List[str]) -> QueryType:
     """
     Determine the routing path for this query.
 
-    Four possible outcomes:
-      SINGLE_STOCK    — question is about a specific ticker
-      CROSS_PORTFOLIO — comparative question across multiple stocks
+    Five possible outcomes:
+      SINGLE_STOCK    — exactly one ticker → single-stock deep dive
+      COMPARISON      — 2+ specific tickers → focused multi-ticker analysis
+      CROSS_PORTFOLIO — comparative question across the full seed portfolio
       GENERAL         — broad financial knowledge question
       OUT_OF_SCOPE    — not a financial question at all
     """
-    if ticker:
+    if len(tickers) == 1:
         return QueryType.SINGLE_STOCK
 
+    if len(tickers) >= 2:
+        return QueryType.COMPARISON
+
+    # No tickers found — classify by question intent
     prompt = f"""You are a query classifier for a financial analysis system.
 
 Question: "{question}"
 
 Classify into exactly ONE category:
 
-CROSS_PORTFOLIO — compares or ranks specific stocks
+CROSS_PORTFOLIO — compares or ranks stocks from the existing portfolio without 
+  naming specific tickers:
   Examples: "Which stock has the most insider selling?"
             "Which companies are most bullish on Reddit?"
             "Are there stocks where insiders disagree with retail sentiment?"
 
-GENERAL — broad financial knowledge, no specific stock needed
+GENERAL — broad financial knowledge, no specific stock needed:
   Examples: "What is insider trading?"
             "What should I invest in?"
             "Explain what a short squeeze is"
 
-OUT_OF_SCOPE — NOT a financial question at all
+OUT_OF_SCOPE — NOT a financial question at all:
   Examples: "Is life beautiful?"
             "What's the weather today?"
             "Tell me a joke"
@@ -299,6 +324,13 @@ async def query(request: QueryRequest):
       - First call  : omit session_id → system creates one → returned in response
       - Follow-up   : pass session_id → system loads history → prepends to synthesis
       - New chat    : omit session_id again → fresh session created
+
+    Routing:
+      SINGLE_STOCK    → 1 ticker found → deep single-stock analysis
+      COMPARISON      → 2+ tickers found → focused multi-ticker synthesis
+      CROSS_PORTFOLIO → no tickers, portfolio-level question
+      GENERAL         → no tickers, broad financial question
+      OUT_OF_SCOPE    → non-financial → immediate polite return
     """
     # ── Session management ────────────────────────────────────────────────────
     session_id  = request.session_id or str(uuid.uuid4())
@@ -307,46 +339,53 @@ async def query(request: QueryRequest):
     print(f"[Session] ID={session_id[:8]}... | Turn={turn_number} | "
           f"History={len(history) // 2} prior turn(s)")
 
-    # ── Step 1: Resolve ticker ────────────────────────────────────────────────
-    ticker = request.ticker
-    if ticker:
-        ticker = ticker.upper().strip()
-    else:
-        ticker = _extract_ticker_regex(request.question)
-        print(f"[Router] Regex extraction: {ticker}")
+    # ── Step 1: Resolve tickers ───────────────────────────────────────────────
+    # Priority: explicit request field > regex > LLM > history inheritance
 
-        if not ticker:
-            ticker = _extract_ticker_llm(request.question)
-            print(f"[Router] LLM extraction: {ticker}")
+    # Normalise the incoming request — support both old `ticker` and new `tickers`
+    if request.tickers:
+        tickers = [t.upper().strip() for t in request.tickers]
+    elif request.ticker:
+        tickers = [request.ticker.upper().strip()]
+    else:
+        tickers = _extract_tickers_regex(request.question)
+        print(f"[Router] Regex extraction: {tickers}")
+
+        if not tickers:
+            tickers = _extract_tickers_llm(request.question)
+            print(f"[Router] LLM extraction: {tickers}")
 
         # ── Step 1b: History-based ticker resolution ──────────────────────────
-        # Only if regex + LLM both failed to find a ticker.
-        # Checks the immediately previous turn (last history entry):
-        #   - If last turn had a ticker (single-stock) → inherit it.
-        #     e.g. "Is that risk high?" after "What is Boeing doing?" → BA ✅
-        #   - If last turn had no ticker (cross-portfolio/general) → don't inherit.
-        #     e.g. "Is that risk high?" after "What should I invest in?" → portfolio ✅
-        #   This way all 3 scenarios work correctly:
-        #     Scenario 1: explicit ticker in question      → regex/LLM finds it
-        #     Scenario 2: follow-up on last single-stock   → inherited from history
-        #     Scenario 3: follow-up after portfolio query  → stays cross-portfolio
-        if not ticker and history:
-            last_turn = history[-1]   # most recent entry (always the assistant turn)
-            last_ticker = last_turn.get("ticker")
-            if last_ticker:
-                ticker = last_ticker
-                print(f"[Router] Ticker resolved from last turn history → {ticker}")
+        # Only if regex + LLM both found nothing.
+        #
+        # Inherit tickers from the most recent turn so follow-ups work:
+        #   "Is that risky?"          after single-stock BA → ["BA"] ✅
+        #   "Which one has more risk?" after comparison GME vs NVDA → ["GME","NVDA"] ✅
+        #   "Is that risky?"          after portfolio query → [] (portfolio) ✅
+        if not tickers and history:
+            last_turn         = history[-1]   # always the assistant turn
+            inherited_tickers = last_turn.get("tickers", [])
+            # Also support old sessions that stored single `ticker`
+            if not inherited_tickers and last_turn.get("ticker"):
+                inherited_tickers = [last_turn["ticker"]]
+            if inherited_tickers:
+                tickers = inherited_tickers
+                print(f"[Router] Tickers inherited from history → {tickers}")
             else:
-                print(f"[Router] Last turn had no ticker — not inheriting, routing to portfolio")
+                print("[Router] Last turn had no tickers — routing to portfolio")
 
     # ── Step 2: Classify ──────────────────────────────────────────────────────
-    query_type = _classify_query(request.question, ticker)
-    print(f"[Router] Final route → type={query_type.value} ticker={ticker}")
+    query_type = _classify_query(request.question, tickers)
+    print(f"[Router] Final route → type={query_type.value} tickers={tickers}")
 
-    # ── Path 0: Out of scope — return immediately, no retrieval ──────────────
+    # Convenience: first ticker (or None) for backward compat fields
+    primary_ticker = tickers[0] if tickers else None
+
+    # ── Path 0: Out of scope ──────────────────────────────────────────────────
     if query_type == QueryType.OUT_OF_SCOPE:
         return QueryResponse(
             query_type      = query_type.value,
+            tickers         = [],
             ticker          = None,
             narrative       = {
                 "message": (
@@ -362,8 +401,9 @@ async def query(request: QueryRequest):
             turn_number     = turn_number,
         )
 
-    # ── Path A: Single-stock (any ticker, auto-ingests if new) ────────────────
+    # ── Path A: Single-stock deep dive ────────────────────────────────────────
     if query_type == QueryType.SINGLE_STOCK:
+        ticker = primary_ticker
         try:
             context = await retrieve_all(ticker, request.question)
         except Exception as e:
@@ -374,26 +414,26 @@ async def query(request: QueryRequest):
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"Synthesis failed: {str(e)}")
 
-        # Compact summary stored in session — enough context for follow-ups
         answer_summary = (
             f"{output.narrative.summary} "
             f"Risk: {output.narrative.risk_percentage}%. "
             f"{output.narrative.conclusion}"
         )
-        append_turn(session_id, request.question, answer_summary, ticker)
+        append_turn(session_id, request.question, answer_summary, tickers=[ticker])
         store_graph(
-            session_id      = session_id,
-            nodes           = [n.model_dump() for n in output.knowledge_graph.nodes],
-            edges           = [e.model_dump() for e in output.knowledge_graph.edges],
-            title           = f"{ticker} Analysis",
-            summary         = output.narrative.summary,
-            risk_pct        = output.narrative.risk_percentage,
-            risk_label      = output.narrative.risk_level,
-            contradiction   = output.narrative.contradictions,
+            session_id    = session_id,
+            nodes         = [n.model_dump() for n in output.knowledge_graph.nodes],
+            edges         = [e.model_dump() for e in output.knowledge_graph.edges],
+            title         = f"{ticker} Analysis",
+            summary       = output.narrative.summary,
+            risk_pct      = output.narrative.risk_percentage,
+            risk_label    = output.narrative.risk_level,
+            contradiction = output.narrative.contradictions,
         )
 
         return QueryResponse(
             query_type      = query_type.value,
+            tickers         = [ticker],
             ticker          = ticker,
             narrative       = output.narrative.model_dump(),
             knowledge_graph = {
@@ -411,7 +451,56 @@ async def query(request: QueryRequest):
             turn_number     = turn_number,
         )
 
-    # ── Path B: Cross-portfolio or General ────────────────────────────────────
+    # ── Path B: Comparison — focused multi-ticker analysis ────────────────────
+    if query_type == QueryType.COMPARISON:
+        print(f"[Router] Comparison mode — fetching data for: {tickers}")
+        try:
+            # Re-use run_cross_portfolio_retrieval but scoped to the named tickers
+            contexts = await run_cross_portfolio_retrieval(
+                request.question,
+                tickers_override=tickers,   # ← pass explicit list
+            )
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Comparison retrieval failed: {str(e)}")
+
+        try:
+            output = synthesize_general(contexts, request.question, history=history)
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Comparison synthesis failed: {str(e)}")
+
+        answer_summary = (
+            f"{output.narrative.answer} "
+            f"{output.narrative.conclusion}"
+        )
+        append_turn(session_id, request.question, answer_summary, tickers=tickers)
+        store_graph(
+            session_id    = session_id,
+            nodes         = [n.model_dump() for n in output.knowledge_graph.nodes],
+            edges         = [e.model_dump() for e in output.knowledge_graph.edges],
+            title         = f"Comparison: {' vs '.join(tickers)}",
+            summary       = output.narrative.portfolio_risk_summary
+                            if hasattr(output.narrative, "portfolio_risk_summary") else "",
+            risk_pct      = 0,
+            risk_label    = "",
+            contradiction = "",
+        )
+
+        return QueryResponse(
+            query_type      = query_type.value,
+            tickers         = tickers,
+            ticker          = output.narrative.top_ticker,
+            narrative       = output.narrative.model_dump(),
+            knowledge_graph = {
+                "nodes": [n.model_dump() for n in output.knowledge_graph.nodes],
+                "edges": [e.model_dump() for e in output.knowledge_graph.edges],
+            },
+            price           = None,
+            retrieved_docs  = None,
+            session_id      = session_id,
+            turn_number     = turn_number,
+        )
+
+    # ── Path C: Cross-portfolio or General ────────────────────────────────────
     else:
         try:
             contexts = await run_cross_portfolio_retrieval(request.question)
@@ -427,20 +516,22 @@ async def query(request: QueryRequest):
             f"{output.narrative.answer} "
             f"{output.narrative.conclusion}"
         )
-        append_turn(session_id, request.question, answer_summary, ticker=None)
+        append_turn(session_id, request.question, answer_summary, tickers=[])
         store_graph(
-            session_id      = session_id,
-            nodes           = [n.model_dump() for n in output.knowledge_graph.nodes],
-            edges           = [e.model_dump() for e in output.knowledge_graph.edges],
-            title           = f"Portfolio Analysis",
-            summary         = output.narrative.portfolio_risk_summary if hasattr(output.narrative, "portfolio_risk_summary") else "",
-            risk_pct        = 0,
-            risk_label      = "",
-            contradiction   = "",
+            session_id    = session_id,
+            nodes         = [n.model_dump() for n in output.knowledge_graph.nodes],
+            edges         = [e.model_dump() for e in output.knowledge_graph.edges],
+            title         = "Portfolio Analysis",
+            summary       = output.narrative.portfolio_risk_summary
+                            if hasattr(output.narrative, "portfolio_risk_summary") else "",
+            risk_pct      = 0,
+            risk_label    = "",
+            contradiction = "",
         )
 
         return QueryResponse(
             query_type      = query_type.value,
+            tickers         = [],
             ticker          = output.narrative.top_ticker,
             narrative       = output.narrative.model_dump(),
             knowledge_graph = {
@@ -462,25 +553,6 @@ async def query(request: QueryRequest):
     tags=["Session"],
 )
 async def get_session_history(session_id: str):
-    """
-    Return the full conversation history for a given session.
-
-    Useful for:
-      - Debugging memory behaviour during frontend development
-      - Verifying that history is being stored correctly after each turn
-      - The frontend can call this on page load to restore a previous session
-
-    Response format:
-      {
-        "session_id": "abc-123",
-        "turn_count": 3,
-        "turns": [
-          {"role": "user",      "content": "...", "ticker": "TSLA", "turn": 1},
-          {"role": "assistant", "content": "...", "ticker": "TSLA", "turn": 1},
-          ...
-        ]
-      }
-    """
     history = get_history(session_id)
     return {
         "session_id" : session_id,
@@ -495,10 +567,6 @@ async def get_session_history(session_id: str):
     tags=["Session"],
 )
 async def clear_session_endpoint(session_id: str):
-    """
-    Clear the conversation history for a given session.
-    Call this when the user clicks 'New Chat' on the frontend.
-    """
     clear_session(session_id)
     return {"status": "cleared", "session_id": session_id}
 
@@ -509,5 +577,4 @@ async def clear_session_endpoint(session_id: str):
     tags=["Session"],
 )
 async def active_sessions():
-    """Returns the count of currently active sessions. For monitoring only."""
     return {"active_sessions": session_count()}

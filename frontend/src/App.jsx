@@ -20,22 +20,41 @@ const SENTIMENT_COLORS = {
   LOW: "#00ff9d", MEDIUM: "#f6ad55", HIGH: "#ff4d6d", VERY_HIGH: "#ff2050",
 };
 
+// ── Preloaded seed news — shown before any query is made ──────────────────────
+const SEED_NEWS = [
+  { ticker: "NVDA", headline: "NVIDIA posts record data-center revenue as AI chip demand accelerates", time: "2h ago", sentiment: "bullish" },
+  { ticker: "AAPL", headline: "Apple expands services revenue to new high with Vision Pro ecosystem growth", time: "3h ago", sentiment: "bullish" },
+  { ticker: "TSLA", headline: "Tesla Q1 deliveries miss analyst estimates amid production retooling", time: "4h ago", sentiment: "bearish" },
+  { ticker: "GME", headline: "GameStop exploring crypto and collectibles pivot as core game sales slide", time: "5h ago", sentiment: "neutral" },
+  { ticker: "JPM", headline: "JPMorgan beats earnings expectations on strong investment banking fees", time: "6h ago", sentiment: "bullish" },
+  { ticker: "BA", headline: "Boeing faces fresh FAA scrutiny over 737 MAX quality-control gaps", time: "7h ago", sentiment: "bearish" },
+  { ticker: "PLTR", headline: "Palantir wins $480M US Army AI contract, shares jump 8% in after-hours", time: "8h ago", sentiment: "bullish" },
+  { ticker: "PFE", headline: "Pfizer cuts full-year guidance as COVID vaccine demand continues to fade", time: "9h ago", sentiment: "bearish" },
+  { ticker: "NEE", headline: "NextEra Energy secures $2B offshore wind project off Florida coast", time: "10h ago", sentiment: "bullish" },
+  { ticker: "XOM", headline: "ExxonMobil raises dividend as Permian Basin output hits 25-year high", time: "11h ago", sentiment: "bullish" },
+];
+
 // ── Subcomponents ─────────────────────────────────────────────────────────────
 
-function RiskGauge({ score }) {
+function RiskGauge({ score, size = 100 }) {
   const color = RISK_COLOR(score);
+  const s = size;
+  const cx = s / 2, cy = s * 0.6, r = s * 0.38;
   const angle = (score / 100) * 180 - 90;
   const rad = (angle * Math.PI) / 180;
-  const x = 50 + 35 * Math.cos(rad);
-  const y = 50 + 35 * Math.sin(rad);
+  const nx = cx + r * Math.cos(rad);
+  const ny = cy + r * Math.sin(rad);
+  const arcLen = Math.PI * r;
   return (
-    <svg width="100" height="60" viewBox="0 0 100 60">
-      <path d="M 10 50 A 40 40 0 0 1 90 50" fill="none" stroke="#1a2535" strokeWidth="8" strokeLinecap="round" />
-      <path d="M 10 50 A 40 40 0 0 1 90 50" fill="none" stroke={color} strokeWidth="8" strokeLinecap="round"
-        strokeDasharray={`${(score / 100) * 125.6} 125.6`} />
-      <line x1="50" y1="50" x2={x} y2={y} stroke={color} strokeWidth="2" strokeLinecap="round" />
-      <circle cx="50" cy="50" r="3" fill={color} />
-      <text x="50" y="44" textAnchor="middle" fill={color} fontSize="11" fontWeight="700">{score}%</text>
+    <svg width={s} height={s * 0.65} viewBox={`0 0 ${s} ${s * 0.65}`}>
+      <path d={`M ${cx - r} ${cy} A ${r} ${r} 0 0 1 ${cx + r} ${cy}`}
+        fill="none" stroke="#1a2535" strokeWidth={s * 0.08} strokeLinecap="round" />
+      <path d={`M ${cx - r} ${cy} A ${r} ${r} 0 0 1 ${cx + r} ${cy}`}
+        fill="none" stroke={color} strokeWidth={s * 0.08} strokeLinecap="round"
+        strokeDasharray={`${(score / 100) * arcLen} ${arcLen}`} />
+      <line x1={cx} y1={cy} x2={nx} y2={ny} stroke={color} strokeWidth="2" strokeLinecap="round" />
+      <circle cx={cx} cy={cy} r="3" fill={color} />
+      <text x={cx} y={cy - r * 0.3} textAnchor="middle" fill={color} fontSize={s * 0.115} fontWeight="700">{score}%</text>
     </svg>
   );
 }
@@ -51,7 +70,6 @@ function MiniChart({ data, positive }) {
     return `${x},${y}`;
   }).join(" ");
   const color = positive ? "#00ff9d" : "#ff4d6d";
-  const areapts = `0,${H} ${pts} ${W},${H}`;
   return (
     <svg width="100%" height={H} viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" style={{ display: "block" }}>
       <defs>
@@ -60,7 +78,7 @@ function MiniChart({ data, positive }) {
           <stop offset="100%" stopColor={color} stopOpacity="0" />
         </linearGradient>
       </defs>
-      <polygon points={areapts} fill="url(#chartGrad)" />
+      <polygon points={`0,${H} ${pts} ${W},${H}`} fill="url(#chartGrad)" />
       <polyline points={pts} fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
     </svg>
   );
@@ -82,7 +100,46 @@ function SentimentBar({ label, bullish, bearish, neutral }) {
   );
 }
 
-// ── Ticker Carousel using live prices from /api/health ────────────────────────
+// ── Multi-ticker price card ───────────────────────────────────────────────────
+function TickerPriceCard({ tickerSymbol, priceData, insight }) {
+  const price = priceData;
+  const up = (price?.change ?? 0) >= 0;
+  const riskPct = insight?.risk_percentage ?? 0;
+  return (
+    <div style={{
+      background: "#0d1825", border: "1px solid #1a2d45", borderRadius: 10,
+      padding: "10px 14px", minWidth: 150, flex: "1 1 150px",
+    }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 4 }}>
+        <span style={{ fontSize: 12, fontWeight: 700, color: "#00ff9d", fontFamily: "'JetBrains Mono', monospace" }}>{tickerSymbol}</span>
+        {riskPct > 0 && (
+          <span style={{ fontSize: 10, color: RISK_COLOR(riskPct), fontFamily: "monospace" }}>Risk {riskPct}%</span>
+        )}
+      </div>
+      {price ? (
+        <>
+          <div style={{ fontSize: 18, fontWeight: 700, color: "#c8d8e8" }}>${price.current_price?.toFixed(2) ?? "—"}</div>
+          <div style={{ fontSize: 11, color: up ? "#00ff9d" : "#ff4d6d", marginBottom: 4 }}>
+            {up ? "▲" : "▼"} {Math.abs(price.change_pct ?? 0).toFixed(2)}%
+          </div>
+          <div style={{ display: "flex", gap: 10 }}>
+            <span style={{ fontSize: 10, color: "#3a5070" }}>H: <span style={{ color: "#8aa8c0" }}>${price.day_high?.toFixed(2) ?? "—"}</span></span>
+            <span style={{ fontSize: 10, color: "#3a5070" }}>L: <span style={{ color: "#8aa8c0" }}>${price.day_low?.toFixed(2) ?? "—"}</span></span>
+          </div>
+        </>
+      ) : (
+        <div style={{ fontSize: 11, color: "#4a6080", marginTop: 4 }}>Loading…</div>
+      )}
+      {insight?.sentiment_label && (
+        <div style={{ marginTop: 6, fontSize: 10, fontWeight: 600, color: SENTIMENT_COLORS[insight.sentiment_label] || "#a0aec0" }}>
+          {insight.sentiment_label}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Ticker Carousel ───────────────────────────────────────────────────────────
 function TickerCarousel({ livePrices }) {
   const tickers = [...SEED_TICKERS, ...SEED_TICKERS];
   return (
@@ -97,12 +154,12 @@ function TickerCarousel({ livePrices }) {
             </div>
           );
           const pos = (d.change ?? d.change_pct ?? 0) >= 0;
-          const price = d.current_price ?? d.price ?? 0;
+          const p = d.current_price ?? d.price ?? 0;
           const pct = Math.abs(d.change_pct ?? d.pct ?? 0);
           return (
             <div key={i} style={styles.tickerItem}>
               <span style={styles.tickerSymbol}>{t}</span>
-              <span style={styles.tickerPrice}>${price.toFixed(2)}</span>
+              <span style={styles.tickerPrice}>${p.toFixed(2)}</span>
               <span style={{ ...styles.tickerChange, color: pos ? "#00ff9d" : "#ff4d6d" }}>
                 {pos ? "▲" : "▼"} {pct.toFixed(2)}%
               </span>
@@ -125,76 +182,50 @@ export default function App() {
   const [activeTab, setActiveTab] = useState(null);
   const [activeResponse, setActiveResponse] = useState(null);
   const [livePrices, setLivePrices] = useState({});
-  const [newsIdx, setNewsIdx] = useState(0);
   const messagesEndRef = useRef(null);
   const inputRef = useRef(null);
 
-  // ── Fetch live prices from /api/health on mount ───────────────────────────
-  // We also poll every 60s so the ticker carousel stays fresh
-  const fetchHealthPrices = useCallback(async () => {
-    try {
-      const res = await fetch(`${API_BASE}/health`);
-      if (!res.ok) return;
-      // Health doesn't return prices directly, so fetch each seed ticker price
-      // via a lightweight approach: call /api/query isn't suitable here.
-      // Instead we use the ingest status which has counts, not prices.
-      // Real-time prices come from the query response's `price` field.
-      // For the carousel we do a batch fetch using the Finnhub-backed endpoint.
-      // Since the backend exposes no dedicated price endpoint, we store prices
-      // from query responses and seed with reasonable defaults.
-    } catch (_) {}
-  }, []);
-
-  // Fetch live price for a specific ticker via a lightweight backend call
-  const fetchTickerPrice = useCallback(async (ticker) => {
+  const fetchTickerPrice = useCallback(async (t) => {
     try {
       const res = await fetch(`${API_BASE}/query`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ question: `price of ${ticker}`, ticker }),
+        body: JSON.stringify({ question: `price of ${t}`, ticker: t }),
       });
       const data = await res.json();
-      if (data.price && data.price.current_price) {
-        setLivePrices(prev => ({ ...prev, [ticker]: data.price }));
+      if (data.price?.current_price) {
+        setLivePrices(prev => ({ ...prev, [t]: data.price }));
       }
     } catch (_) {}
   }, []);
 
-  // On mount: fetch prices for visible tickers one by one (staggered to avoid rate limits)
   useEffect(() => {
     let cancelled = false;
-    const fetchAll = async () => {
+    (async () => {
       for (let i = 0; i < SEED_TICKERS.length; i++) {
         if (cancelled) break;
         await fetchTickerPrice(SEED_TICKERS[i]);
-        await new Promise(r => setTimeout(r, 800)); // stagger requests
+        await new Promise(r => setTimeout(r, 800));
       }
-    };
-    fetchAll();
+    })();
     return () => { cancelled = true; };
   }, [fetchTickerPrice]);
 
-  // Rotate news panel
-  useEffect(() => {
-    const timer = setInterval(() => setNewsIdx(i => (i + 1) % Math.max(1, liveNews.length)), 8000);
-    return () => clearInterval(timer);
-  }, []);
-
-  // Auto-scroll chat
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
-  // ── Derive live news from last real response ──────────────────────────────
+  // ── News: live from last response OR seed headlines ───────────────────────
   const liveNews = activeResponse?.retrieved_docs?.news?.slice(0, 10).map(doc => ({
-    ticker: activeResponse.ticker,
+    ticker: activeResponse.tickers?.[0] || activeResponse.ticker || "—",
     headline: doc.metadata?.title || doc.document?.slice(0, 80) || "News article",
     time: doc.metadata?.date_str || "recent",
     sentiment: activeResponse.narrative?.risk_level === "LOW" ? "bullish"
       : activeResponse.narrative?.risk_level === "HIGH" ? "bearish" : "neutral",
   })) || [];
+  const newsPanel = liveNews.length > 0 ? liveNews : SEED_NEWS;
 
-  // ── Submit handler ────────────────────────────────────────────────────────
+  // ── Submit ────────────────────────────────────────────────────────────────
   const handleSubmit = useCallback(async () => {
     if (!query.trim() || loading) return;
     const userMsg = query.trim();
@@ -209,71 +240,56 @@ export default function App() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ question: userMsg, session_id: sessionId }),
       });
-
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
 
-      // Persist session
       const newSession = data.session_id || sessionId || crypto.randomUUID();
       if (!sessionId) {
         setSessionId(newSession);
-        setChatHistory(prev => [
-          { id: newSession, title: userMsg.slice(0, 40), ts: Date.now() },
-          ...prev,
-        ]);
+        setChatHistory(prev => [{ id: newSession, title: userMsg.slice(0, 40), ts: Date.now() }, ...prev]);
       }
 
-      // Store live price if we got one
-      if (data.price && data.ticker && data.price.current_price) {
+      if (data.price?.current_price && data.ticker) {
         setLivePrices(prev => ({ ...prev, [data.ticker]: data.price }));
       }
-
       setActiveResponse(data);
 
-      // ── Build chat message content from REAL backend fields ──────────────
-      // Path A: single-stock → narrative has summary, conclusion, risk_level, etc.
-      // Path B: general/portfolio → narrative has answer, conclusion
-      // Path 0: out_of_scope → narrative has message
-      let content = "Analysis complete.";
       const n = data.narrative || {};
-
+      let content = "Analysis complete.";
       if (data.query_type === "out_of_scope") {
-        content = n.message || "That doesn't seem to be a financial question. Try asking about a specific stock.";
+        content = n.message || "That doesn't seem to be a financial question.";
       } else if (data.query_type === "single_stock") {
         content = [n.summary, n.conclusion].filter(Boolean).join("\n\n") || "Analysis complete.";
+      } else if (data.query_type === "comparison") {
+        const insightLines = (n.ticker_insights || [])
+          .map(ti => `${ti.ticker}: ${ti.summary} (Risk ${ti.risk_percentage}%)`)
+          .join("\n");
+        content = [n.answer, insightLines, n.conclusion].filter(Boolean).join("\n\n") || "Analysis complete.";
       } else {
-        // cross_portfolio or general
         content = [n.answer, n.conclusion].filter(Boolean).join("\n\n") || "Analysis complete.";
       }
 
-      // Sentiment label: use risk_level for single-stock, or derive from answer
-      const sentimentLabel = n.risk_level || null;
+      const displayTicker = data.query_type === "comparison"
+        ? (data.tickers || []).join(" vs ")
+        : data.ticker;
 
-      setMessages(prev => [
-        ...prev,
-        {
-          role: "assistant",
-          content,
-          ticker: data.ticker,
-          riskScore: data.risk_score?.risk_percentage ?? n.risk_percentage ?? null,
-          sentiment: sentimentLabel,
-          session: newSession,
-          queryType: data.query_type,
-        },
-      ]);
+      setMessages(prev => [...prev, {
+        role: "assistant", content,
+        ticker: displayTicker,
+        tickers: data.tickers || (data.ticker ? [data.ticker] : []),
+        riskScore: data.risk_score?.risk_percentage ?? n.risk_percentage ?? null,
+        sentiment: n.risk_level || null,
+        session: newSession,
+        queryType: data.query_type,
+      }]);
       setActiveTab("price");
 
     } catch (err) {
-      setMessages(prev => [
-        ...prev,
-        {
-          role: "assistant",
-          content: `Error: ${err.message}. Please check that the backend is running.`,
-          ticker: null,
-          riskScore: null,
-          sentiment: null,
-        },
-      ]);
+      setMessages(prev => [...prev, {
+        role: "assistant",
+        content: `Error: ${err.message}. Please check that the backend is running.`,
+        ticker: null, riskScore: null, sentiment: null,
+      }]);
     } finally {
       setLoading(false);
     }
@@ -284,124 +300,111 @@ export default function App() {
   };
 
   const startNewChat = async () => {
-    // Tell backend to clear session too
     if (sessionId) {
       try { await fetch(`${API_BASE}/session/${sessionId}`, { method: "DELETE" }); } catch (_) {}
     }
-    setMessages([]);
-    setSessionId(null);
-    setActiveResponse(null);
-    setActiveTab(null);
-    setSidebarOpen(false);
+    setMessages([]); setSessionId(null); setActiveResponse(null);
+    setActiveTab(null); setSidebarOpen(false);
     inputRef.current?.focus();
   };
 
-  // ── Derived display data — ALL from real backend response ─────────────────
+  // ── Derived display state ─────────────────────────────────────────────────
+  const isMultiTicker = activeResponse &&
+    ["comparison", "cross_portfolio", "general"].includes(activeResponse.query_type);
   const ticker = activeResponse?.ticker;
   const riskScore = activeResponse?.risk_score?.risk_percentage
-    ?? activeResponse?.narrative?.risk_percentage
-    ?? 0;
-  const price = activeResponse?.price || null; // { current_price, change, change_pct, day_high, day_low, open, previous_close, is_live }
+    ?? activeResponse?.narrative?.risk_percentage ?? 0;
+  const price = activeResponse?.price || null;
   const hasConversation = messages.length > 0;
 
-  // Build sparkline from price data (simulated intraday based on real OHLC)
+  // Multi-ticker: zip ticker_insights with livePrices
+  const multiTickerData = isMultiTicker
+    ? (activeResponse?.narrative?.ticker_insights || []).map(ti => ({
+        ticker: ti.ticker,
+        price: livePrices[ti.ticker] || null,
+        insight: ti,
+      }))
+    : [];
+
+  // Sparkline for single-stock
   const sparklineData = price ? (() => {
     const { open = 0, day_low = 0, day_high = 0, current_price = 0 } = price;
-    const pts = [];
-    for (let i = 0; i < 20; i++) {
+    const pts = Array.from({ length: 20 }, (_, i) => {
       const t = i / 19;
       const base = open + (current_price - open) * t;
       const noise = (day_high - day_low) * 0.15 * (Math.random() - 0.5);
-      pts.push(Math.max(day_low, Math.min(day_high, base + noise)));
-    }
+      return Math.max(day_low, Math.min(day_high, base + noise));
+    });
     pts[pts.length - 1] = current_price;
     return pts;
   })() : [];
 
-  // Build sentiment bars from real retrieved docs
+  // Sentiment data (single-stock only, from retrieved_docs)
   const sentimentData = (() => {
     if (!activeResponse?.retrieved_docs) return null;
     const { news = [], social = [], reddit_buzz = [] } = activeResponse.retrieved_docs;
     const narrative = activeResponse.narrative || {};
-
-    // News sentiment: count positive/negative keywords in titles
     let newsBull = 0, newsBear = 0;
     news.forEach(doc => {
-      const text = (doc.metadata?.title || doc.document || "").toLowerCase();
-      if (/beat|surged|gain|up|strong|record|bullish|positive|growth|rose/.test(text)) newsBull++;
-      else if (/miss|fell|drop|down|weak|concern|bearish|negative|loss|cut/.test(text)) newsBear++;
+      const t = (doc.metadata?.title || doc.document || "").toLowerCase();
+      if (/beat|surged|gain|up|strong|record|bullish|positive|growth|rose/.test(t)) newsBull++;
+      else if (/miss|fell|drop|down|weak|concern|bearish|negative|loss|cut/.test(t)) newsBear++;
     });
-    const newsTotal = Math.max(1, news.length);
-    const newsBullPct = Math.round((newsBull / newsTotal) * 100);
-    const newsBearPct = Math.round((newsBear / newsTotal) * 100);
-    const newsNeutralPct = 100 - newsBullPct - newsBearPct;
-
-    // Social: count engagement-weighted sentiment
+    const nt = Math.max(1, news.length);
+    const newsBullPct = Math.round((newsBull / nt) * 100);
+    const newsBearPct = Math.round((newsBear / nt) * 100);
     let socialScore = 0;
     social.forEach(doc => {
-      const text = (doc.document || "").toLowerCase();
-      const eng = doc.metadata?.engagement_score || 1;
-      if (/bull|buy|moon|great|love|up|win|🚀/.test(text)) socialScore += eng;
-      else if (/bear|sell|crash|bad|hate|down|loss|💀/.test(text)) socialScore -= eng;
+      const t = (doc.document || "").toLowerCase();
+      const e = doc.metadata?.engagement_score || 1;
+      if (/bull|buy|moon|great|love|🚀/.test(t)) socialScore += e;
+      else if (/bear|sell|crash|bad|hate|💀/.test(t)) socialScore -= e;
     });
-    const socialBullPct = socialScore > 0 ? Math.min(80, 50 + Math.round(socialScore / 10)) : Math.max(20, 50 + Math.round(socialScore / 10));
-    const socialBearPct = 100 - socialBullPct - 12;
-
-    // Reddit: from buzz signal
+    const socialBullPct = Math.min(80, Math.max(20, 50 + Math.round(socialScore / 10)));
     const buzz = reddit_buzz[0];
     const redditBullPct = buzz
       ? (buzz.metadata?.rank_change === "RISING" ? 70 : buzz.metadata?.rank_change === "FALLING" ? 35 : 52)
       : 50;
-
-    // SEC vs Social: use contradiction analysis from narrative
-    const hasContradiction = (narrative.contradictions || "").length > 20;
-    const secBullPct = hasContradiction ? 40 : 60;
-
+    const secBullPct = (narrative.contradictions || "").length > 20 ? 40 : 60;
     return {
-      news: { bullish: newsBullPct, bearish: Math.max(0, newsBearPct), neutral: Math.max(0, newsNeutralPct) },
-      social: { bullish: socialBullPct, bearish: Math.max(0, socialBearPct), neutral: 12 },
+      news: { bullish: newsBullPct, bearish: newsBearPct, neutral: Math.max(0, 100 - newsBullPct - newsBearPct) },
+      social: { bullish: socialBullPct, bearish: Math.max(0, 100 - socialBullPct - 12), neutral: 12 },
       reddit: { bullish: redditBullPct, bearish: Math.max(0, 100 - redditBullPct - 15), neutral: 15 },
       sec: { bullish: secBullPct, bearish: Math.max(0, 100 - secBullPct - 15), neutral: 15 },
     };
   })();
 
-  // Build SEC cards from real retrieved sec_filings
+  // SEC cards (single-stock)
   const secCards = (() => {
     if (!activeResponse?.retrieved_docs?.sec_filings) return [];
-    const filings = activeResponse.retrieved_docs.sec_filings;
     const seen = new Set();
-    return filings.slice(0, 3).map(doc => {
+    return activeResponse.retrieved_docs.sec_filings.slice(0, 3).map(doc => {
       const meta = doc.metadata || {};
       const type = meta.filing_type || "SEC";
       if (seen.has(type)) return null;
       seen.add(type);
-      const icons = { "10-K": "📄", "10-Q": "📊", "8-K": "⚡" };
-      const labels = { "10-K": "Annual Report", "10-Q": "Quarterly Report", "8-K": "Material Event" };
       return {
         type,
-        label: labels[type] || "Filing",
-        icon: icons[type] || "📋",
-        note: doc.document?.slice(0, 100).trim() + "..." || meta.section || "Filing reviewed",
+        label: { "10-K": "Annual Report", "10-Q": "Quarterly Report", "8-K": "Material Event" }[type] || "Filing",
+        icon: { "10-K": "📄", "10-Q": "📊", "8-K": "⚡" }[type] || "📋",
+        note: (doc.document?.slice(0, 100).trim() || meta.section || "Filing reviewed") + "...",
         date: meta.filed_date || "recent",
       };
     }).filter(Boolean);
   })();
 
-  // News panel: use real retrieved news from latest response, fallback to empty
-  const newsPanel = liveNews.length > 0 ? liveNews : [];
+  const graphUrl = sessionId ? `${API_BASE}/graph/view/${sessionId}` : null;
 
   return (
     <div style={styles.root}>
-      {/* ── Ticker Carousel ── */}
       <TickerCarousel livePrices={livePrices} />
 
-      {/* ── Layout ── */}
       <div style={styles.layout}>
-        <button style={styles.sidebarToggle} onClick={() => setSidebarOpen(o => !o)} title="Menu">
+        <button style={styles.sidebarToggle} onClick={() => setSidebarOpen(o => !o)}>
           <span style={styles.hamburger}>{sidebarOpen ? "✕" : "☰"}</span>
         </button>
 
-        {/* ── Left Sidebar ── */}
+        {/* ── Sidebar ── */}
         <div style={{ ...styles.sidebar, transform: sidebarOpen ? "translateX(0)" : "translateX(-100%)" }}>
           <div style={styles.sidebarHeader}>
             <div style={styles.logo}>ΑΛΕΧIS</div>
@@ -431,7 +434,7 @@ export default function App() {
           </div>
         </div>
 
-        {/* ── Center Chat ── */}
+        {/* ── Chat ── */}
         <div style={styles.chatArea}>
           {!hasConversation ? (
             <div style={styles.welcome}>
@@ -439,10 +442,9 @@ export default function App() {
               <div style={styles.welcomeSub}>Financial Intelligence Engine</div>
               <div style={styles.welcomeHint}>Ask me anything about the watchlist stocks</div>
               <div style={styles.quickPrompts}>
-                {["Is NVDA a risky buy?", "Compare GME and TSLA", "Which stocks are most bullish on Reddit?", "AAPL SEC filing highlights"].map(p => (
-                  <button key={p} style={styles.quickBtn} onClick={() => { setQuery(p); inputRef.current?.focus(); }}>
-                    {p}
-                  </button>
+                {["Is NVDA a risky buy?", "Compare GME and NVDA", "Compare AAPL, MSFT and NVDA",
+                  "Which stocks are most bullish on Reddit?", "AAPL SEC filing highlights"].map(p => (
+                  <button key={p} style={styles.quickBtn} onClick={() => { setQuery(p); inputRef.current?.focus(); }}>{p}</button>
                 ))}
               </div>
             </div>
@@ -477,9 +479,7 @@ export default function App() {
                   <div style={styles.avatarA}>Α</div>
                   <div style={{ ...styles.bubble, ...styles.bubbleAssistant }}>
                     <div style={styles.typing}>
-                      <span style={styles.dot} />
-                      <span style={{ ...styles.dot, animationDelay: "0.2s" }} />
-                      <span style={{ ...styles.dot, animationDelay: "0.4s" }} />
+                      <span style={styles.dot} /><span style={{ ...styles.dot, animationDelay: "0.2s" }} /><span style={{ ...styles.dot, animationDelay: "0.4s" }} />
                     </div>
                   </div>
                 </div>
@@ -487,34 +487,26 @@ export default function App() {
               <div ref={messagesEndRef} />
             </div>
           )}
-
-          {/* ── Input ── */}
           <div style={{ ...styles.inputArea, ...(hasConversation ? styles.inputAreaBottom : styles.inputAreaCenter) }}>
             <div style={styles.inputWrap}>
-              <textarea
-                ref={inputRef}
-                rows={1}
-                value={query}
-                onChange={e => setQuery(e.target.value)}
-                onKeyDown={handleKeyDown}
-                placeholder="Ask anything about any stock… (e.g. Is Tesla a risky buy right now?)"
-                style={styles.textarea}
+              <textarea ref={inputRef} rows={1} value={query}
+                onChange={e => setQuery(e.target.value)} onKeyDown={handleKeyDown}
+                placeholder="Ask about any stock… (e.g. Compare GME and NVDA)" style={styles.textarea}
               />
               <button onClick={handleSubmit} disabled={!query.trim() || loading} style={styles.sendBtn}>
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <line x1="22" y1="2" x2="11" y2="13" />
-                  <polygon points="22 2 15 22 11 13 2 9 22 2" />
+                  <line x1="22" y1="2" x2="11" y2="13" /><polygon points="22 2 15 22 11 13 2 9 22 2" />
                 </svg>
               </button>
             </div>
           </div>
         </div>
 
-        {/* ── Right Panel: Live News ── */}
+        {/* ── Right Panel: News ── */}
         <div style={styles.rightPanel}>
           <div style={styles.rightHeader}>📡 Live Market News</div>
           <div style={styles.newsScroll}>
-            {newsPanel.length > 0 ? newsPanel.map((n, i) => (
+            {newsPanel.map((n, i) => (
               <div key={i} style={styles.newsCard}>
                 <div style={styles.newsTop}>
                   <span style={styles.newsTicker}>{n.ticker}</span>
@@ -525,88 +517,84 @@ export default function App() {
                 <div style={styles.newsHeadline}>{n.headline}</div>
                 <div style={styles.newsTime}>{n.time}</div>
               </div>
-            )) : (
-              <div style={{ padding: "24px 12px", fontSize: 12, color: "#3a5070", textAlign: "center" }}>
-                Ask about a stock to see live news
-              </div>
-            )}
+            ))}
           </div>
         </div>
       </div>
 
-      {/* ── Bottom Data Panel ── */}
+      {/* ── Bottom Panel ── */}
       {hasConversation && (
         <div style={styles.bottomPanel}>
           <div style={styles.bottomTabs}>
             {[
-              { key: "price", label: "📈 Price Chart" },
+              { key: "price",     label: "📈 Price" },
               { key: "sentiment", label: "💬 Sentiment" },
-              { key: "risk", label: "⚠️ Risk Score" },
-              { key: "sec", label: "📋 SEC Signals" },
+              { key: "risk",      label: "⚠️ Risk Score" },
+              { key: "sec",       label: "📋 SEC Signals" },
+              { key: "graph",     label: "🧠 Knowledge Graph" },
             ].map(tab => (
-              <button
-                key={tab.key}
+              <button key={tab.key}
                 style={{ ...styles.tabBtn, ...(activeTab === tab.key ? styles.tabBtnActive : {}) }}
-                onClick={() => setActiveTab(activeTab === tab.key ? null : tab.key)}
-              >
+                onClick={() => setActiveTab(activeTab === tab.key ? null : tab.key)}>
                 {tab.label}
               </button>
             ))}
-            {ticker && (
+            {!isMultiTicker && ticker && (
               <span style={styles.tabTicker}>{ticker} · {COMPANY_NAMES[ticker] || ticker}</span>
             )}
+            {isMultiTicker && multiTickerData.length > 0 && (
+              <span style={styles.tabTicker}>{multiTickerData.map(d => d.ticker).join(" · ")}</span>
+            )}
             {price?.is_live && (
-              <span style={{ marginLeft: 8, fontSize: 9, color: "#00ff9d", background: "#0d2b1f", padding: "2px 6px", borderRadius: 3 }}>
-                🟢 LIVE
-              </span>
+              <span style={{ marginLeft: 8, fontSize: 9, color: "#00ff9d", background: "#0d2b1f", padding: "2px 6px", borderRadius: 3 }}>🟢 LIVE</span>
             )}
           </div>
 
           {activeTab && (
-            <div style={styles.bottomContent}>
+            <div style={{ ...styles.bottomContent, ...(activeTab === "graph" ? { padding: 0, maxHeight: 420 } : {}) }}>
 
-              {/* ── Price Chart — real Finnhub data ── */}
-              {activeTab === "price" && (
+              {/* ── PRICE ── */}
+              {activeTab === "price" && !isMultiTicker && price && (
                 <div style={styles.chartArea}>
-                  {price ? (
-                    <>
-                      <div style={styles.chartHeader}>
-                        <span style={styles.chartTicker}>{ticker}</span>
-                        <span style={styles.chartPrice}>${price.current_price?.toFixed(2) ?? "—"}</span>
-                        <span style={{ color: (price.change ?? 0) >= 0 ? "#00ff9d" : "#ff4d6d", fontSize: 13 }}>
-                          {(price.change ?? 0) >= 0 ? "▲" : "▼"} {Math.abs(price.change_pct ?? 0).toFixed(2)}%
-                        </span>
+                  <div style={styles.chartHeader}>
+                    <span style={styles.chartTicker}>{ticker}</span>
+                    <span style={styles.chartPrice}>${price.current_price?.toFixed(2) ?? "—"}</span>
+                    <span style={{ color: (price.change ?? 0) >= 0 ? "#00ff9d" : "#ff4d6d", fontSize: 13 }}>
+                      {(price.change ?? 0) >= 0 ? "▲" : "▼"} {Math.abs(price.change_pct ?? 0).toFixed(2)}%
+                    </span>
+                  </div>
+                  <MiniChart data={sparklineData} positive={(price.change ?? 0) >= 0} />
+                  <div style={styles.priceGrid}>
+                    {[["Open", price.open], ["High", price.day_high], ["Low", price.day_low], ["Prev Close", price.previous_close]].map(([lbl, val]) => (
+                      <div key={lbl} style={styles.priceCell}>
+                        <span style={styles.priceLabel}>{lbl}</span>
+                        <span style={styles.priceVal}>${val?.toFixed(2) ?? "—"}</span>
                       </div>
-                      <MiniChart data={sparklineData} positive={(price.change ?? 0) >= 0} />
-                      <div style={styles.priceGrid}>
-                        <div style={styles.priceCell}>
-                          <span style={styles.priceLabel}>Open</span>
-                          <span style={styles.priceVal}>${price.open?.toFixed(2) ?? "—"}</span>
-                        </div>
-                        <div style={styles.priceCell}>
-                          <span style={styles.priceLabel}>High</span>
-                          <span style={styles.priceVal}>${price.day_high?.toFixed(2) ?? "—"}</span>
-                        </div>
-                        <div style={styles.priceCell}>
-                          <span style={styles.priceLabel}>Low</span>
-                          <span style={styles.priceVal}>${price.day_low?.toFixed(2) ?? "—"}</span>
-                        </div>
-                        <div style={styles.priceCell}>
-                          <span style={styles.priceLabel}>Prev Close</span>
-                          <span style={styles.priceVal}>${price.previous_close?.toFixed(2) ?? "—"}</span>
-                        </div>
-                      </div>
-                    </>
-                  ) : (
-                    <div style={{ color: "#4a6080", fontSize: 13, padding: "20px 0" }}>
-                      No price data available for this query type.
+                    ))}
+                  </div>
+                </div>
+              )}
+              {activeTab === "price" && !isMultiTicker && !price && (
+                <div style={{ color: "#4a6080", fontSize: 13, padding: "20px 0" }}>No price data available for this query type.</div>
+              )}
+              {activeTab === "price" && isMultiTicker && (
+                <div>
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
+                    {multiTickerData.map(({ ticker: t, price: p, insight }) => (
+                      <TickerPriceCard key={t} tickerSymbol={t} priceData={p} insight={insight} />
+                    ))}
+                  </div>
+                  {activeResponse?.narrative?.portfolio_risk_summary && (
+                    <div style={{ marginTop: 12, padding: "8px 12px", background: "#0d1825", border: "1px solid #1a2d45", borderRadius: 8, fontSize: 11, color: "#8aa8c0", lineHeight: 1.6 }}>
+                      <span style={{ color: "#f6ad55", fontWeight: 600 }}>📊 Portfolio Risk: </span>
+                      {activeResponse.narrative.portfolio_risk_summary}
                     </div>
                   )}
                 </div>
               )}
 
-              {/* ── Sentiment — derived from real retrieved docs ── */}
-              {activeTab === "sentiment" && (
+              {/* ── SENTIMENT ── */}
+              {activeTab === "sentiment" && !isMultiTicker && (
                 <div style={styles.sentimentArea}>
                   {sentimentData ? (
                     <>
@@ -626,17 +614,39 @@ export default function App() {
                   )}
                 </div>
               )}
+              {activeTab === "sentiment" && isMultiTicker && (
+                <div style={styles.sentimentArea}>
+                  {multiTickerData.map(({ ticker: t, insight }) => {
+                    if (!insight) return null;
+                    const sc = SENTIMENT_COLORS[insight.sentiment_label] || "#a0aec0";
+                    return (
+                      <div key={t} style={{ marginBottom: 14 }}>
+                        <div style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 5 }}>
+                          <span style={{ fontSize: 12, fontWeight: 700, color: "#00ff9d", fontFamily: "monospace", minWidth: 50 }}>{t}</span>
+                          <span style={{ fontSize: 11, fontWeight: 600, color: sc }}>{insight.sentiment_label}</span>
+                          <span style={{ fontSize: 10, color: RISK_COLOR(insight.risk_percentage ?? 0), marginLeft: "auto" }}>
+                            Risk {insight.risk_percentage ?? 0}%
+                          </span>
+                        </div>
+                        <div style={{ height: 6, background: "#1a2d45", borderRadius: 3, overflow: "hidden" }}>
+                          <div style={{ width: `${(insight.relevance_score ?? 0.5) * 100}%`, background: sc, height: "100%", transition: "width 0.5s" }} />
+                        </div>
+                        <div style={{ fontSize: 10, color: "#4a6080", marginTop: 4, lineHeight: 1.4 }}>{insight.key_signal}</div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
 
-              {/* ── Risk Score — real risk_score from backend ── */}
-              {activeTab === "risk" && (
+              {/* ── RISK SCORE ── */}
+              {activeTab === "risk" && !isMultiTicker && (
                 <div style={styles.riskArea}>
                   <div style={styles.riskMain}>
                     <RiskGauge score={riskScore} />
                     <div>
                       <div style={styles.riskLabel}>Overall Risk</div>
                       <div style={{ color: RISK_COLOR(riskScore), fontSize: 24, fontWeight: 700 }}>
-                        {activeResponse?.risk_score?.risk_label
-                          || (riskScore < 35 ? "Low Risk" : riskScore < 65 ? "Moderate Risk" : "High Risk")}
+                        {activeResponse?.risk_score?.risk_label || (riskScore < 35 ? "Low Risk" : riskScore < 65 ? "Moderate Risk" : "High Risk")}
                       </div>
                       {activeResponse?.risk_score?.dominant_risk_factor && (
                         <div style={{ fontSize: 11, color: "#6a8aaa", marginTop: 6, maxWidth: 200, lineHeight: 1.4 }}>
@@ -647,25 +657,46 @@ export default function App() {
                   </div>
                   <div style={styles.riskBreakdown}>
                     {[
-                      { label: "News Signal Risk", score: sentimentData ? sentimentData.news.bearish : 0 },
-                      { label: "Social Volatility", score: sentimentData ? sentimentData.social.bearish : 0 },
+                      { label: "News Signal Risk", score: sentimentData?.news.bearish ?? 0 },
+                      { label: "Social Volatility", score: sentimentData?.social.bearish ?? 0 },
                       { label: "Reddit Momentum", score: sentimentData ? (100 - sentimentData.reddit.bullish) : 0 },
                       { label: "SEC Filing Flags", score: secCards.length > 0 ? Math.min(90, secCards.length * 25) : 0 },
                     ].map(r => (
                       <div key={r.label} style={styles.riskRow}>
                         <span style={styles.riskRowLabel}>{r.label}</span>
-                        <div style={styles.riskBar}>
-                          <div style={{ ...styles.riskFill, width: `${r.score}%`, background: RISK_COLOR(r.score) }} />
-                        </div>
+                        <div style={styles.riskBar}><div style={{ ...styles.riskFill, width: `${r.score}%`, background: RISK_COLOR(r.score) }} /></div>
                         <span style={styles.riskPct}>{r.score}%</span>
                       </div>
                     ))}
                   </div>
                 </div>
               )}
+              {activeTab === "risk" && isMultiTicker && (
+                <div>
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 16, alignItems: "flex-start" }}>
+                    {multiTickerData.map(({ ticker: t, insight }) => {
+                      if (!insight) return null;
+                      const rp = insight.risk_percentage ?? 0;
+                      return (
+                        <div key={t} style={{ textAlign: "center", minWidth: 80 }}>
+                          <RiskGauge score={rp} size={80} />
+                          <div style={{ fontSize: 11, fontWeight: 700, color: "#00ff9d", fontFamily: "monospace", marginTop: 2 }}>{t}</div>
+                          <div style={{ fontSize: 10, color: RISK_COLOR(rp) }}>{insight.risk_level}</div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                  {activeResponse?.narrative?.portfolio_risk_summary && (
+                    <div style={{ marginTop: 12, padding: "8px 12px", background: "#0d1825", border: "1px solid #1a2d45", borderRadius: 8, fontSize: 11, color: "#8aa8c0", lineHeight: 1.6 }}>
+                      <span style={{ color: "#c8d8e8", fontWeight: 600 }}>Summary: </span>
+                      {activeResponse.narrative.portfolio_risk_summary}
+                    </div>
+                  )}
+                </div>
+              )}
 
-              {/* ── SEC Signals — real retrieved SEC filing chunks ── */}
-              {activeTab === "sec" && ticker && (
+              {/* ── SEC SIGNALS ── */}
+              {activeTab === "sec" && !isMultiTicker && (
                 <div style={styles.secArea}>
                   {secCards.length > 0 ? secCards.map(s => (
                     <div key={s.type} style={styles.secCard}>
@@ -677,13 +708,47 @@ export default function App() {
                       </div>
                       <div style={styles.secBadge}>Live</div>
                     </div>
-                  )) : (
-                    <div style={{ color: "#4a6080", fontSize: 13 }}>No SEC filing data available for this query.</div>
-                  )}
+                  )) : <div style={{ color: "#4a6080", fontSize: 13 }}>No SEC filing data available.</div>}
                   {activeResponse?.narrative?.sec_filings_analysis && (
                     <div style={{ marginTop: 8, padding: "10px 14px", background: "#0d1825", border: "1px solid #1a2d45", borderRadius: 10, fontSize: 11, color: "#8aa8c0", lineHeight: 1.6 }}>
                       <span style={{ color: "#c8d8e8", fontWeight: 600 }}>AI Analysis: </span>
                       {activeResponse.narrative.sec_filings_analysis}
+                    </div>
+                  )}
+                </div>
+              )}
+              {activeTab === "sec" && isMultiTicker && (
+                <div style={styles.secArea}>
+                  {multiTickerData.length === 0
+                    ? <div style={{ color: "#4a6080", fontSize: 13 }}>No SEC data for this query.</div>
+                    : multiTickerData.map(({ ticker: t, insight }) => {
+                        if (!insight) return null;
+                        return (
+                          <div key={t} style={styles.secCard}>
+                            <div style={styles.secIcon}>📋</div>
+                            <div style={{ flex: 1 }}>
+                              <div style={styles.secType}>{t} — {COMPANY_NAMES[t] || t}</div>
+                              <div style={styles.secNote}>{insight.key_signal}</div>
+                            </div>
+                            <div style={{ ...styles.secBadge, color: SENTIMENT_COLORS[insight.sentiment_label] || "#a0aec0", background: "transparent", border: "none" }}>
+                              {insight.sentiment_label}
+                            </div>
+                          </div>
+                        );
+                      })
+                  }
+                </div>
+              )}
+
+              {/* ── KNOWLEDGE GRAPH ── */}
+              {activeTab === "graph" && (
+                <div style={{ height: 420, width: "100%", position: "relative" }}>
+                  {graphUrl ? (
+                    <iframe key={graphUrl} src={graphUrl} title="Knowledge Graph"
+                      style={{ width: "100%", height: "100%", border: "none", background: "#1a1a2e" }} />
+                  ) : (
+                    <div style={{ color: "#4a6080", fontSize: 13, padding: 20 }}>
+                      Run a query first to generate a knowledge graph.
                     </div>
                   )}
                 </div>
