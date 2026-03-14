@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 const API_BASE = "/api";
@@ -186,6 +186,7 @@ export default function App() {
   const [chatHistory, setChatHistory] = useState([]);
   const [activeTab, setActiveTab] = useState(null);
   const [activeResponse, setActiveResponse] = useState(null);
+  const [bottomCollapsed, setBottomCollapsed] = useState(false);
   // Initialise with mock prices so carousel is populated instantly
   const [livePrices, setLivePrices] = useState(MOCK_PRICES);
   const messagesEndRef = useRef(null);
@@ -384,22 +385,30 @@ export default function App() {
       }))
     : [];
 
-  const sparklineData = price ? (() => {
+  const sparklineData = useMemo(() => {
+    if (!price) return [];
     const { open = 0, day_low = 0, day_high = 0, current_price = 0 } = price;
+    const seed = Math.round((open + current_price + day_high + day_low) * 100);
+    const pseudoRand = (i) => {
+      const x = Math.sin(seed + i * 127.1) * 43758.5453;
+      return x - Math.floor(x);
+    };
     const pts = Array.from({ length: 20 }, (_, i) => {
       const t = i / 19;
       const base = open + (current_price - open) * t;
-      const noise = (day_high - day_low) * 0.15 * (Math.random() - 0.5);
+      const noise = (day_high - day_low) * 0.15 * (pseudoRand(i) - 0.5);
       return Math.max(day_low, Math.min(day_high, base + noise));
     });
     pts[pts.length - 1] = current_price;
     return pts;
-  })() : [];
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeResponse?.ticker, price?.current_price, price?.open, price?.day_high, price?.day_low]);
 
-  const sentimentData = (() => {
+  const sentimentData = useMemo(() => {
     if (!activeResponse?.retrieved_docs) return null;
     const { news = [], social = [], reddit_buzz = [] } = activeResponse.retrieved_docs;
     const narrative = activeResponse.narrative || {};
+
     let newsBull = 0, newsBear = 0;
     news.forEach(doc => {
       const t = (doc.metadata?.title || doc.document || "").toLowerCase();
@@ -409,26 +418,30 @@ export default function App() {
     const nt = Math.max(1, news.length);
     const newsBullPct = Math.round((newsBull / nt) * 100);
     const newsBearPct = Math.round((newsBear / nt) * 100);
-    let socialScore = 0;
-    social.forEach(doc => {
-      const t = (doc.document || "").toLowerCase();
-      const e = doc.metadata?.engagement_score || 1;
-      if (/bull|buy|moon|great|love|🚀/.test(t)) socialScore += e;
-      else if (/bear|sell|crash|bad|hate|💀/.test(t)) socialScore -= e;
-    });
-    const socialBullPct = Math.min(80, Math.max(20, 50 + Math.round(socialScore / 10)));
+
+    const actualRisk  = activeResponse?.risk_score?.risk_percentage ?? narrative?.risk_percentage ?? 50;
+    const sentLabel   = narrative?.sentiment_label || "NEUTRAL";
+    const labelToBull = { BULLISH: 70, BEARISH: 30, MIXED: 50, NEUTRAL: 50 };
+    const socialBullPct = Math.min(95, Math.max(5, labelToBull[sentLabel] ?? 50));
+    const socialBearPct = Math.max(0, 100 - socialBullPct - 12);
+
     const buzz = reddit_buzz[0];
-    const redditBullPct = buzz
-      ? (buzz.metadata?.rank_change === "RISING" ? 70 : buzz.metadata?.rank_change === "FALLING" ? 35 : 52)
-      : 50;
-    const secBullPct = (narrative.contradictions || "").length > 20 ? 40 : 60;
+    const rankChange    = buzz?.metadata?.rank_change;
+    const redditBullPct = rankChange === "RISING" ? 68 : rankChange === "FALLING" ? 32 : 50;
+
+    const hasContradiction = activeResponse?.risk_score?.contradiction_detected ?? false;
+    const contradictionLen = (narrative?.contradictions || "").length;
+    const secBullPct = hasContradiction || contradictionLen > 20
+      ? Math.max(15, 50 - Math.min(30, Math.round(actualRisk * 0.3)))
+      : Math.min(85, 50 + Math.round((100 - actualRisk) * 0.25));
+
     return {
-      news:   { bullish: newsBullPct, bearish: newsBearPct, neutral: Math.max(0, 100 - newsBullPct - newsBearPct) },
-      social: { bullish: socialBullPct, bearish: Math.max(0, 100 - socialBullPct - 12), neutral: 12 },
+      news:   { bullish: newsBullPct,   bearish: newsBearPct,   neutral: Math.max(0, 100 - newsBullPct - newsBearPct) },
+      social: { bullish: socialBullPct, bearish: socialBearPct, neutral: 12 },
       reddit: { bullish: redditBullPct, bearish: Math.max(0, 100 - redditBullPct - 15), neutral: 15 },
-      sec:    { bullish: secBullPct, bearish: Math.max(0, 100 - secBullPct - 15), neutral: 15 },
+      sec:    { bullish: secBullPct,    bearish: Math.max(0, 100 - secBullPct - 15),    neutral: 15 },
     };
-  })();
+  }, [activeResponse]);
 
   const secCards = (() => {
     if (!activeResponse?.retrieved_docs?.sec_filings) return [];
@@ -610,33 +623,51 @@ export default function App() {
       {/* ── Bottom Panel ── */}
       {hasConversation && (
         <div style={styles.bottomPanel}>
-          <div style={styles.bottomTabs}>
-            {[
-              { key: "price",     label: "📈 Price" },
-              { key: "sentiment", label: "💬 Sentiment" },
-              { key: "risk",      label: "⚠️ Risk Score" },
-              { key: "sec",       label: "📋 SEC Signals" },
-              { key: "graph",     label: "🧠 Knowledge Graph" },
-            ].map(tab => (
-              <button key={tab.key}
-                style={{ ...styles.tabBtn, ...(activeTab === tab.key ? styles.tabBtnActive : {}) }}
-                onClick={() => setActiveTab(activeTab === tab.key ? null : tab.key)}>
-                {tab.label}
-              </button>
-            ))}
-            {!isMultiTicker && ticker && (
-              <span style={styles.tabTicker}>{ticker} · {COMPANY_NAMES[ticker] || ticker}</span>
-            )}
-            {isMultiTicker && multiTickerData.length > 0 && (
-              <span style={styles.tabTicker}>{multiTickerData.map(d => d.ticker).join(" · ")}</span>
-            )}
-            {price?.is_live && (
-              <span style={{ marginLeft: 8, fontSize: 9, color: "#00ff9d", background: "#0d2b1f", padding: "2px 6px", borderRadius: 3 }}>🟢 LIVE</span>
-            )}
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", paddingRight: 12 }}>
+            <div style={styles.bottomTabs}>
+              {[
+                { key: "price",     label: "📈 Price" },
+                { key: "sentiment", label: "💬 Sentiment" },
+                { key: "risk",      label: "⚠️ Risk Score" },
+                { key: "sec",       label: "📋 SEC Signals" },
+                { key: "graph",     label: "🧠 Knowledge Graph" },
+                { key: "reasoning", label: "🔍 Reasoning" },
+              ].map(tab => (
+                <button key={tab.key}
+                  style={{ ...styles.tabBtn, ...(activeTab === tab.key ? styles.tabBtnActive : {}) }}
+                  onClick={() => { setActiveTab(activeTab === tab.key ? null : tab.key); setBottomCollapsed(false); }}>
+                  {tab.label}
+                </button>
+              ))}
+              {!isMultiTicker && ticker && (
+                <span style={styles.tabTicker}>{ticker} · {COMPANY_NAMES[ticker] || ticker}</span>
+              )}
+              {isMultiTicker && multiTickerData.length > 0 && (
+                <span style={styles.tabTicker}>{multiTickerData.map(d => d.ticker).join(" · ")}</span>
+              )}
+              {price?.is_live && (
+                <span style={{ marginLeft: 8, fontSize: 9, color: "#00ff9d", background: "#0d2b1f", padding: "2px 6px", borderRadius: 3 }}>🟢 LIVE</span>
+              )}
+            </div>
+            <button
+              onClick={() => setBottomCollapsed(prev => !prev)}
+              title={bottomCollapsed ? "Expand panel" : "Minimize panel"}
+              style={{
+                background: "transparent", border: "1px solid #1a2d45", borderRadius: 6,
+                color: "#4a6080", cursor: "pointer", padding: "4px 10px", fontSize: 12,
+                display: "flex", alignItems: "center", gap: 5, flexShrink: 0,
+                transition: "color 0.2s, border-color 0.2s",
+                fontFamily: "'JetBrains Mono', monospace",
+              }}
+              onMouseEnter={e => { e.currentTarget.style.color = "#00D2FF"; e.currentTarget.style.borderColor = "#00D2FF66"; }}
+              onMouseLeave={e => { e.currentTarget.style.color = "#4a6080"; e.currentTarget.style.borderColor = "#1a2d45"; }}
+            >
+              {bottomCollapsed ? "▲ Expand" : "▼ Minimize"}
+            </button>
           </div>
 
-          {activeTab && (
-            <div style={{ ...styles.bottomContent, ...(activeTab === "graph" ? { padding: 0, maxHeight: 420 } : {}) }}>
+          {activeTab && !bottomCollapsed && (
+            <div style={{ ...styles.bottomContent, ...(activeTab === "graph" ? { padding: 0, maxHeight: 420 } : activeTab === "reasoning" ? { maxHeight: 380 } : {}) }}>
 
               {/* ── PRICE ── */}
               {activeTab === "price" && !isMultiTicker && price && (
@@ -739,18 +770,27 @@ export default function App() {
                     </div>
                   </div>
                   <div style={styles.riskBreakdown}>
-                    {[
-                      { label: "News Signal Risk",  score: sentimentData?.news.bearish ?? 0 },
-                      { label: "Social Volatility", score: sentimentData?.social.bearish ?? 0 },
-                      { label: "Reddit Momentum",   score: sentimentData ? (100 - sentimentData.reddit.bullish) : 0 },
-                      { label: "SEC Filing Flags",  score: secCards.length > 0 ? Math.min(90, secCards.length * 25) : 0 },
-                    ].map(r => (
-                      <div key={r.label} style={styles.riskRow}>
-                        <span style={styles.riskRowLabel}>{r.label}</span>
-                        <div style={styles.riskBar}><div style={{ ...styles.riskFill, width: `${r.score}%`, background: RISK_COLOR(r.score) }} /></div>
-                        <span style={styles.riskPct}>{r.score}%</span>
-                      </div>
-                    ))}
+                    {(() => {
+                      const base = riskScore;
+                      const newsBearRaw   = sentimentData?.news.bearish ?? 0;
+                      const socialBearRaw = sentimentData?.social.bearish ?? 0;
+                      const redditRaw     = sentimentData ? (100 - sentimentData.reddit.bullish) : 0;
+                      const secRaw        = secCards.length > 0 ? Math.min(90, secCards.length * 25) : 0;
+                      const blend = (raw) => Math.round((raw * 0.4) + (base * 0.6));
+                      const rows = [
+                        { label: "News Signal Risk",  score: blend(newsBearRaw) },
+                        { label: "Social Volatility", score: blend(socialBearRaw) },
+                        { label: "Reddit Momentum",   score: blend(redditRaw) },
+                        { label: "SEC Filing Flags",  score: secRaw > 0 ? blend(secRaw) : Math.round(base * 0.5) },
+                      ];
+                      return rows.map(r => (
+                        <div key={r.label} style={styles.riskRow}>
+                          <span style={styles.riskRowLabel}>{r.label}</span>
+                          <div style={styles.riskBar}><div style={{ ...styles.riskFill, width: `${r.score}%`, background: RISK_COLOR(r.score) }} /></div>
+                          <span style={styles.riskPct}>{r.score}%</span>
+                        </div>
+                      ));
+                    })()}
                   </div>
                 </div>
               )}
@@ -823,6 +863,73 @@ export default function App() {
                 </div>
               )}
 
+              {/* ── CHAIN-OF-THOUGHT REASONING ── */}
+              {activeTab === "reasoning" && (() => {
+                const n = activeResponse?.narrative;
+                if (!n) return (
+                  <div style={{ color: "#4a6080", fontSize: 13 }}>Ask about a specific stock to see the reasoning chain.</div>
+                );
+                const cotSteps = isMultiTicker ? [
+                  { num: "01", title: "Query Classification",        icon: "🎯", text: n.answer },
+                  { num: "02", title: "Cross-Portfolio Signal Scan", icon: "📡", text: n.methodology },
+                  { num: "03", title: "Ticker-Level Intelligence",   icon: "📊", text: (n.ticker_insights || []).map(ti => `${ti.ticker}: ${ti.summary}`).join(" | ") },
+                  { num: "04", title: "Synthesized Conclusion",      icon: "✅", text: n.conclusion },
+                ] : [
+                  { num: "01", title: "News Signal Analysis",    icon: "📰", text: n.news_analysis },
+                  { num: "02", title: "Social Media Sentiment",  icon: "💬", text: n.social_sentiment },
+                  { num: "03", title: "Reddit Momentum Signal",  icon: "📈", text: n.reddit_buzz_signal },
+                  { num: "04", title: "SEC Filing Intelligence", icon: "📋", text: n.sec_filings_analysis },
+                  { num: "05", title: "Price Action Context",    icon: "💹", text: n.price_context },
+                  { num: "06", title: "Contradiction Detection", icon: "⚠️", text: n.contradictions || "No significant contradictions detected across data sources." },
+                  { num: "07", title: "Synthesized Conclusion",  icon: "✅", text: n.conclusion },
+                ];
+                const completedCount = cotSteps.filter(s => s.text && s.text.trim().length > 10).length;
+                return (
+                  <div>
+                    <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 14 }}>
+                      <div style={{ width: 8, height: 8, borderRadius: "50%", background: "#00ff9d", boxShadow: "0 0 8px #00ff9d" }} />
+                      <span style={{ fontSize: 11, fontWeight: 700, color: "#00D2FF", textTransform: "uppercase", letterSpacing: 2, fontFamily: "'JetBrains Mono', monospace" }}>
+                        Chain-of-Thought Reasoning
+                      </span>
+                      <span style={{ marginLeft: "auto", fontSize: 10, color: "#4a6080", fontFamily: "'JetBrains Mono', monospace" }}>
+                        {completedCount}/{cotSteps.length} steps
+                      </span>
+                    </div>
+                    <div style={{ display: "flex", flexDirection: "column", gap: 0 }}>
+                      {cotSteps.map((step, idx) => {
+                        const isLast     = idx === cotSteps.length - 1;
+                        const hasContent = step.text && step.text.trim().length > 10;
+                        const isContra   = step.num === "06";
+                        const noContra   = step.text === "No significant contradictions detected across data sources.";
+                        const stepColor  = isContra && hasContent && !noContra ? "#f6ad55" : isLast ? "#00ff9d" : "#00D2FF";
+                        const numBg      = isContra && hasContent && !noContra ? "#2a1a00" : isLast ? "#002a1a" : "#0a1e2f";
+                        const numBorder  = isContra && hasContent && !noContra ? "#f6ad5544" : isLast ? "#00ff9d44" : "#00D2FF44";
+                        return (
+                          <div key={step.num} style={{ display: "flex", gap: 14, position: "relative" }}>
+                            {!isLast && (
+                              <div style={{ position: "absolute", left: 17, top: 36, bottom: 0, width: 1, background: "linear-gradient(to bottom, #1a3050, transparent)", zIndex: 0 }} />
+                            )}
+                            <div style={{ width: 36, height: 36, borderRadius: 8, flexShrink: 0, background: numBg, border: `1px solid ${numBorder}`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, fontWeight: 700, color: stepColor, fontFamily: "'JetBrains Mono', monospace", zIndex: 1, marginTop: 2 }}>
+                              {step.num}
+                            </div>
+                            <div style={{ flex: 1, paddingBottom: isLast ? 0 : 16 }}>
+                              <div style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: 4 }}>
+                                <span style={{ fontSize: 13 }}>{step.icon}</span>
+                                <span style={{ fontSize: 12, fontWeight: 700, color: hasContent ? "#c8d8e8" : "#3a5070" }}>{step.title}</span>
+                              </div>
+                              {hasContent
+                                ? <div style={{ fontSize: 11, color: "#8aa8c0", lineHeight: 1.65, paddingRight: 8 }}>{step.text}</div>
+                                : <div style={{ fontSize: 11, color: "#2a4060", fontStyle: "italic" }}>Awaiting data…</div>
+                              }
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                );
+              })()}
+
               {/* ── KNOWLEDGE GRAPH ── */}
               {activeTab === "graph" && (
                 <div style={{ height: 420, width: "100%", position: "relative" }}>
@@ -858,96 +965,97 @@ export default function App() {
 }
 
 // ── Styles ────────────────────────────────────────────────────────────────────
+// ── Styles (Cyber-Vantage Palette Updated) ────────────────────────────────────
 const styles = {
-  root: { display: "flex", flexDirection: "column", height: "100vh", background: "#070d16", color: "#c8d8e8", overflow: "hidden" },
-  ticker: { height: 32, background: "#090f1c", borderBottom: "1px solid #1a2d45", overflow: "hidden", flexShrink: 0 },
+  root: { display: "flex", flexDirection: "column", height: "100vh", background: "#0A0E17", color: "#E0E6ED", overflow: "hidden" },
+  ticker: { height: 32, background: "#0D121F", borderBottom: "1px solid #1A2D45", overflow: "hidden", flexShrink: 0 },
   tickerTrack: { display: "flex", animation: "scroll 60s linear infinite", width: "max-content", height: "100%", alignItems: "center" },
-  tickerItem: { display: "flex", gap: 6, alignItems: "center", padding: "0 20px", borderRight: "1px solid #1a2d45", height: "100%" },
-  tickerSymbol: { fontSize: 11, fontWeight: 700, color: "#c8d8e8", fontFamily: "'JetBrains Mono', monospace" },
-  tickerPrice: { fontSize: 11, color: "#8aa8c0", fontFamily: "'JetBrains Mono', monospace" },
-  tickerChange: { fontSize: 10, fontFamily: "'JetBrains Mono', monospace" },
+  tickerItem: { display: "flex", gap: 6, alignItems: "center", padding: "0 20px", borderRight: "1px solid #1A2D45", height: "100%" },
+  tickerSymbol: { fontSize: 11, fontWeight: 700, color: "#00D2FF", fontFamily: "'JetBrains Mono', monospace" },
+  tickerPrice: { fontSize: 11, color: "#E0E6ED", fontFamily: "'JetBrains Mono', monospace" },
+  tickerChange: { fontSize: 10, fontFamily: "'JetBrains Mono', monospace" }, // Τα χρώματα (green/red) ορίζονται συνήθως inline στο component
   layout: { display: "flex", flex: 1, minHeight: 0, position: "relative" },
-  sidebarToggle: { position: "absolute", top: 12, left: 12, zIndex: 100, background: "#0f1e30", border: "1px solid #1a3050", borderRadius: 8, width: 36, height: 36, cursor: "pointer", color: "#7aa0c0" },
+  sidebarToggle: { position: "absolute", top: 12, left: 12, zIndex: 100, background: "#162130", border: "1px solid #00D2FF44", borderRadius: 8, width: 36, height: 36, cursor: "pointer", color: "#00D2FF" },
   hamburger: { fontSize: 14 },
-  sidebar: { position: "absolute", top: 0, left: 0, bottom: 0, width: 260, background: "#090f1c", borderRight: "1px solid #1a2d45", zIndex: 90, display: "flex", flexDirection: "column", transition: "transform 0.3s ease", padding: "16px 0 0" },
-  sidebarHeader: { padding: "8px 20px 16px", borderBottom: "1px solid #1a2d45" },
-  logo: { fontSize: 18, fontWeight: 700, color: "#00ff9d", letterSpacing: 2, fontFamily: "'JetBrains Mono', monospace" },
-  logoSub: { fontSize: 10, color: "#4a6080", marginTop: 2 },
-  newChatBtn: { margin: "16px 16px 8px", padding: "10px 16px", background: "linear-gradient(135deg, #0d2b1f, #0a2015)", border: "1px solid #00ff9d44", borderRadius: 10, color: "#00ff9d", fontSize: 13, fontWeight: 600, cursor: "pointer" },
+  sidebar: { position: "absolute", top: 0, left: 0, bottom: 0, width: 260, background: "#0D121F", borderRight: "1px solid #1A2D45", zIndex: 90, display: "flex", flexDirection: "column", transition: "transform 0.3s ease", padding: "16px 0 0" },
+  sidebarHeader: { padding: "8px 20px 16px", borderBottom: "1px solid #1A2D45" },
+  logo: { fontSize: 18, fontWeight: 700, color: "#00D2FF", letterSpacing: 2, fontFamily: "'JetBrains Mono', monospace", textShadow: "0 0 10px #00D2FF66" },
+  logoSub: { fontSize: 10, color: "#4A6080", marginTop: 2 },
+  newChatBtn: { margin: "16px 16px 8px", padding: "10px 16px", background: "linear-gradient(135deg, #0A1E2F, #06121A)", border: "1px solid #00D2FF66", borderRadius: 10, color: "#00D2FF", fontSize: 13, fontWeight: 600, cursor: "pointer" },
   sidebarSearch: { padding: "4px 16px 12px" },
-  sidebarSearchInput: { width: "100%", padding: "8px 12px", background: "#0f1e30", border: "1px solid #1a3050", borderRadius: 8, color: "#c8d8e8", fontSize: 12, outline: "none" },
-  historyLabel: { padding: "0 16px 8px", fontSize: 10, color: "#3a5070", textTransform: "uppercase", letterSpacing: 1 },
+  sidebarSearchInput: { width: "100%", padding: "8px 12px", background: "#162130", border: "1px solid #1A3050", borderRadius: 8, color: "#E0E6ED", fontSize: 12, outline: "none" },
+  historyLabel: { padding: "0 16px 8px", fontSize: 10, color: "#4A6080", textTransform: "uppercase", letterSpacing: 1 },
   historyList: { flex: 1, overflowY: "auto", padding: "0 8px" },
-  historyEmpty: { padding: "20px 12px", fontSize: 12, color: "#3a5070", textAlign: "center" },
+  historyEmpty: { padding: "20px 12px", fontSize: 12, color: "#4A6080", textAlign: "center" },
   historyItem: { display: "flex", alignItems: "flex-start", gap: 10, padding: "10px 12px", borderRadius: 8, cursor: "pointer", marginBottom: 2, transition: "background 0.15s" },
-  historyIcon: { fontSize: 14, marginTop: 1 },
-  historyTitle: { fontSize: 12, color: "#8aa8c0", lineHeight: 1.4, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 160 },
-  historyTime: { fontSize: 10, color: "#3a5070", marginTop: 2 },
-  sidebarFooter: { padding: "12px 20px", borderTop: "1px solid #1a2d45", display: "flex", alignItems: "center", gap: 8 },
-  footerDot: { width: 7, height: 7, borderRadius: "50%", background: "#00ff9d" },
+  historyIcon: { fontSize: 14, marginTop: 1, color: "#00D2FF" },
+  historyTitle: { fontSize: 12, color: "#8AA8C0", lineHeight: 1.4, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 160 },
+  historyTime: { fontSize: 10, color: "#3A5070", marginTop: 2 },
+  sidebarFooter: { padding: "12px 20px", borderTop: "1px solid #1A2D45", display: "flex", alignItems: "center", gap: 8 },
+  footerDot: { width: 7, height: 7, borderRadius: "50%", background: "#39FF14", boxShadow: "0 0 8px #39FF14" },
   chatArea: { flex: 1, display: "flex", flexDirection: "column", minWidth: 0 },
   welcome: { flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 12, padding: 24 },
-  welcomeLogo: { fontSize: 48, fontWeight: 700, color: "#00ff9d", letterSpacing: 4, fontFamily: "'JetBrains Mono', monospace" },
-  welcomeSub: { fontSize: 14, color: "#4a7090", letterSpacing: 2 },
-  welcomeHint: { fontSize: 12, color: "#3a5070", marginTop: 8 },
+  welcomeLogo: { fontSize: 48, fontWeight: 700, color: "#00D2FF", letterSpacing: 4, fontFamily: "'JetBrains Mono', monospace", textShadow: "0 0 20px #00D2FF44" },
+  welcomeSub: { fontSize: 14, color: "#8AA8C0", letterSpacing: 2 },
+  welcomeHint: { fontSize: 12, color: "#4A6080", marginTop: 8 },
   quickPrompts: { display: "flex", flexWrap: "wrap", gap: 8, justifyContent: "center", marginTop: 16 },
-  quickBtn: { padding: "8px 16px", background: "#0b1825", border: "1px solid #1a3050", borderRadius: 20, color: "#6a9ab0", fontSize: 12, cursor: "pointer" },
+  quickBtn: { padding: "8px 16px", background: "#162130", border: "1px solid #1A3050", borderRadius: 20, color: "#00D2FF", fontSize: 12, cursor: "pointer", transition: "all 0.2s" },
   messageList: { flex: 1, overflowY: "auto", padding: "16px 24px", display: "flex", flexDirection: "column", gap: 12 },
   msgRow: { display: "flex", gap: 10, alignItems: "flex-start" },
-  avatarA: { width: 30, height: 30, borderRadius: "50%", background: "linear-gradient(135deg, #0d2b1f, #00ff9d33)", border: "1px solid #00ff9d44", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, fontWeight: 700, color: "#00ff9d", flexShrink: 0 },
-  avatarU: { width: 30, height: 30, borderRadius: "50%", background: "#1a2d45", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, fontWeight: 700, color: "#8aa8c0", flexShrink: 0 },
+  avatarA: { width: 30, height: 30, borderRadius: "50%", background: "linear-gradient(135deg, #0A1E2F, #00D2FF33)", border: "1px solid #00D2FF66", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, fontWeight: 700, color: "#00D2FF", flexShrink: 0 },
+  avatarU: { width: 30, height: 30, borderRadius: "50%", background: "#1A2D45", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, fontWeight: 700, color: "#E0E6ED", flexShrink: 0 },
   bubble: { maxWidth: "72%", padding: "10px 14px", borderRadius: 14, lineHeight: 1.6, animation: "fadeIn 0.2s ease" },
-  bubbleUser: { background: "#0f2540", border: "1px solid #1a3a5c", color: "#c8d8e8", borderRadius: "14px 14px 4px 14px" },
-  bubbleAssistant: { background: "#0b1825", border: "1px solid #1a2d45", color: "#c8d8e8", borderRadius: "14px 14px 14px 4px" },
+  bubbleUser: { background: "#162130", border: "1px solid #1A3A5C", color: "#E0E6ED", borderRadius: "14px 14px 4px 14px" },
+  bubbleAssistant: { background: "#0D121F", border: "1px solid #1A2D45", color: "#E0E6ED", borderRadius: "14px 14px 14px 4px" },
   bubbleMeta: { display: "flex", gap: 8, alignItems: "center", marginBottom: 6 },
-  bubbleTicker: { fontSize: 10, fontWeight: 700, color: "#00ff9d", fontFamily: "'JetBrains Mono', monospace", background: "#0d2b1f", padding: "1px 6px", borderRadius: 3 },
+  bubbleTicker: { fontSize: 10, fontWeight: 700, color: "#39FF14", fontFamily: "'JetBrains Mono', monospace", background: "#0A2015", padding: "1px 6px", borderRadius: 3 },
   bubbleSentiment: { fontSize: 10, fontWeight: 600, textTransform: "uppercase", letterSpacing: 1 },
   bubbleText: { fontSize: 13, whiteSpace: "pre-wrap" },
   typing: { display: "flex", gap: 4, alignItems: "center", padding: "4px 0" },
-  dot: { width: 7, height: 7, borderRadius: "50%", background: "#00ff9d", animation: "bounce 1.2s infinite" },
+  dot: { width: 7, height: 7, borderRadius: "50%", background: "#00D2FF", animation: "bounce 1.2s infinite" },
   inputArea: { padding: "0 24px 12px" },
   inputAreaCenter: {},
   inputAreaBottom: {},
-  inputWrap: { display: "flex", alignItems: "flex-end", background: "#0d1a28", border: "1px solid #1a3050", borderRadius: 14, overflow: "hidden" },
-  textarea: { flex: 1, background: "transparent", border: "none", outline: "none", color: "#c8d8e8", fontSize: 14, padding: "14px 16px", resize: "none", fontFamily: "'Space Grotesk', sans-serif", lineHeight: 1.5, minHeight: 48 },
-  sendBtn: { padding: "12px 16px", background: "transparent", border: "none", cursor: "pointer", color: "#00ff9d" },
-  rightPanel: { width: 240, background: "#090f1c", borderLeft: "1px solid #1a2d45", display: "flex", flexDirection: "column", overflow: "hidden" },
-  rightHeader: { padding: "14px 16px 10px", fontSize: 11, fontWeight: 700, color: "#3a6070", textTransform: "uppercase", letterSpacing: 1, borderBottom: "1px solid #1a2d45" },
+  inputWrap: { display: "flex", alignItems: "flex-end", background: "#0D121F", border: "1px solid #1A3050", borderRadius: 14, overflow: "hidden", transition: "border 0.2s" },
+  textarea: { flex: 1, background: "transparent", border: "none", outline: "none", color: "#E0E6ED", fontSize: 14, padding: "14px 16px", resize: "none", fontFamily: "'Space Grotesk', sans-serif", lineHeight: 1.5, minHeight: 48 },
+  sendBtn: { padding: "12px 16px", background: "transparent", border: "none", cursor: "pointer", color: "#FF007F" },
+  rightPanel: { width: 240, background: "#0D121F", borderLeft: "1px solid #1A2D45", display: "flex", flexDirection: "column", overflow: "hidden" },
+  rightHeader: { padding: "14px 16px 10px", fontSize: 11, fontWeight: 700, color: "#4A6080", textTransform: "uppercase", letterSpacing: 1, borderBottom: "1px solid #1A2D45" },
   newsScroll: { flex: 1, overflowY: "auto", padding: "8px" },
-  newsCard: { padding: "10px 12px", marginBottom: 6, background: "#0b1422", border: "1px solid #1a2d45", borderRadius: 10 },
+  newsCard: { padding: "10px 12px", marginBottom: 6, background: "#111827", border: "1px solid #1A2D45", borderRadius: 10 },
   newsTop: { display: "flex", justifyContent: "space-between", marginBottom: 5 },
-  newsTicker: { fontSize: 10, fontWeight: 700, color: "#00ff9d", fontFamily: "'JetBrains Mono', monospace", background: "#0d2b1f", padding: "1px 6px", borderRadius: 3 },
+  newsTicker: { fontSize: 10, fontWeight: 700, color: "#00D2FF", fontFamily: "'JetBrains Mono', monospace", background: "#0A1E2F", padding: "1px 6px", borderRadius: 3 },
   newsLabel: { fontSize: 9, fontWeight: 600, textTransform: "uppercase", letterSpacing: 0.5 },
-  newsHeadline: { fontSize: 11, color: "#8aa8c0", lineHeight: 1.4, marginBottom: 4 },
-  newsTime: { fontSize: 10, color: "#3a5070" },
-  bottomPanel: { background: "#090f1c", borderTop: "1px solid #1a2d45" },
+  newsHeadline: { fontSize: 11, color: "#E0E6ED", lineHeight: 1.4, marginBottom: 4 },
+  newsTime: { fontSize: 10, color: "#4A6080" },
+  bottomPanel: { background: "#0D121F", borderTop: "1px solid #1A2D45" },
   bottomTabs: { display: "flex", gap: 4, padding: "10px 16px 0", alignItems: "center", overflowX: "auto" },
-  tabBtn: { padding: "7px 14px", background: "transparent", border: "1px solid #1a2d45", borderRadius: "8px 8px 0 0", color: "#4a6080", fontSize: 12, cursor: "pointer", whiteSpace: "nowrap" },
-  tabBtnActive: { background: "#0b1825", borderColor: "#00ff9d44", color: "#00ff9d", borderBottomColor: "#0b1825" },
-  tabTicker: { marginLeft: "auto", fontSize: 11, color: "#3a5070", fontFamily: "'JetBrains Mono', monospace" },
-  bottomContent: { background: "#0b1825", padding: "16px 20px", maxHeight: 220, overflowY: "auto" },
+  tabBtn: { padding: "7px 14px", background: "transparent", border: "1px solid #1A2D45", borderRadius: "8px 8px 0 0", color: "#4A6080", fontSize: 12, cursor: "pointer", whiteSpace: "nowrap" },
+  tabBtnActive: { background: "#162130", borderColor: "#00D2FF66", color: "#00D2FF", borderBottomColor: "#162130" },
+  tabTicker: { marginLeft: "auto", fontSize: 11, color: "#4A6080", fontFamily: "'JetBrains Mono', monospace" },
+  bottomContent: { background: "#162130", padding: "16px 20px", maxHeight: 220, overflowY: "auto" },
   chartArea: {},
   chartHeader: { display: "flex", gap: 12, alignItems: "baseline", marginBottom: 8 },
-  chartTicker: { fontSize: 16, fontWeight: 700, color: "#00ff9d", fontFamily: "'JetBrains Mono', monospace" },
-  chartPrice: { fontSize: 22, fontWeight: 700, color: "#c8d8e8" },
+  chartTicker: { fontSize: 16, fontWeight: 700, color: "#00D2FF", fontFamily: "'JetBrains Mono', monospace" },
+  chartPrice: { fontSize: 22, fontWeight: 700, color: "#E0E6ED" },
   priceGrid: { display: "flex", gap: 16, marginTop: 10 },
   priceCell: { display: "flex", flexDirection: "column", gap: 2 },
-  priceLabel: { fontSize: 10, color: "#3a5070" },
-  priceVal: { fontSize: 12, color: "#8aa8c0", fontFamily: "'JetBrains Mono', monospace" },
+  priceLabel: { fontSize: 10, color: "#4A6080" },
+  priceVal: { fontSize: 12, color: "#E0E6ED", fontFamily: "'JetBrains Mono', monospace" },
   sentimentArea: { padding: "4px 0" },
   riskArea: { display: "flex", gap: 32, alignItems: "flex-start" },
   riskMain: { display: "flex", gap: 16, alignItems: "center", flexShrink: 0 },
-  riskLabel: { fontSize: 11, color: "#4a6080", marginBottom: 4 },
+  riskLabel: { fontSize: 11, color: "#4A6080", marginBottom: 4 },
   riskBreakdown: { flex: 1 },
   riskRow: { display: "flex", alignItems: "center", gap: 10, marginBottom: 10 },
-  riskRowLabel: { fontSize: 11, color: "#6a8aaa", width: 180, flexShrink: 0 },
-  riskBar: { flex: 1, height: 6, background: "#1a2d45", borderRadius: 3, overflow: "hidden" },
-  riskFill: { height: "100%", borderRadius: 3, transition: "width 0.5s ease" },
-  riskPct: { fontSize: 11, color: "#8aa0c0", width: 35, textAlign: "right", fontFamily: "'JetBrains Mono', monospace" },
+  riskRowLabel: { fontSize: 11, color: "#8AA8C0", width: 180, flexShrink: 0 },
+  riskBar: { flex: 1, height: 6, background: "#1A2D45", borderRadius: 3, overflow: "hidden" },
+  riskFill: { height: "100%", borderRadius: 3, transition: "width 0.5s ease" }, // Το χρώμα ορίζεται βάσει score (π.χ. Neon Green ή Pink)
+  riskPct: { fontSize: 11, color: "#00D2FF", width: 35, textAlign: "right", fontFamily: "'JetBrains Mono', monospace" },
   secArea: { display: "flex", flexDirection: "column", gap: 8 },
-  secCard: { display: "flex", alignItems: "center", gap: 14, padding: "10px 14px", background: "#0d1825", border: "1px solid #1a2d45", borderRadius: 10 },
+  secCard: { display: "flex", alignItems: "center", gap: 14, padding: "10px 14px", background: "#111827", border: "1px solid #1A2D45", borderRadius: 10 },
   secIcon: { fontSize: 20, flexShrink: 0 },
-  secType: { fontSize: 12, fontWeight: 600, color: "#c8d8e8", marginBottom: 2 },
-  secNote: { fontSize: 11, color: "#4a6080" },
-  secBadge: { marginLeft: "auto", fontSize: 9, background: "#0d2b1f", color: "#00ff9d", border: "1px solid #00ff9d44", borderRadius: 4, padding: "2px 7px", fontWeight: 700, flexShrink: 0 },
+  secType: { fontSize: 12, fontWeight: 600, color: "#E0E6ED", marginBottom: 2 },
+  secNote: { fontSize: 11, color: "#4A6080" },
+  secBadge: { marginLeft: "auto", fontSize: 9, background: "#0A2015", color: "#39FF14", border: "1px solid #39FF1444", borderRadius: 4, padding: "2px 7px", fontWeight: 700, flexShrink: 0 },
 };
