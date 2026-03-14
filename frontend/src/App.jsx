@@ -20,18 +20,33 @@ const SENTIMENT_COLORS = {
   LOW: "#00ff9d", MEDIUM: "#f6ad55", HIGH: "#ff4d6d", VERY_HIGH: "#ff2050",
 };
 
-// ── Preloaded seed news — shown before any query is made ──────────────────────
+// ── Instant mock prices — shown immediately before live data arrives ───────────
+// Mirrors finnhub_tool.py MOCK_PRICES so the carousel is never empty.
+const MOCK_PRICES = {
+  AAPL: { current_price: 227.50, change: 1.70,   change_pct: 0.75,  day_high: 229.10, day_low: 225.20, open: 226.00, previous_close: 225.80, is_live: false },
+  NVDA: { current_price: 875.40, change: 13.30,  change_pct: 1.54,  day_high: 881.00, day_low: 860.50, open: 865.00, previous_close: 862.10, is_live: false },
+  TSLA: { current_price: 248.20, change: -4.20,  change_pct: -1.66, day_high: 253.80, day_low: 246.10, open: 252.00, previous_close: 252.40, is_live: false },
+  GME:  { current_price: 26.80,  change: 1.70,   change_pct: 6.77,  day_high: 27.50,  day_low: 24.90,  open: 25.20,  previous_close: 25.10,  is_live: false },
+  PLTR: { current_price: 82.50,  change: 2.30,   change_pct: 2.87,  day_high: 83.40,  day_low: 79.80,  open: 80.50,  previous_close: 80.20,  is_live: false },
+  JPM:  { current_price: 238.60, change: 1.70,   change_pct: 0.72,  day_high: 239.80, day_low: 236.20, open: 237.10, previous_close: 236.90, is_live: false },
+  BA:   { current_price: 172.30, change: 1.80,   change_pct: 1.06,  day_high: 173.50, day_low: 169.80, open: 170.80, previous_close: 170.50, is_live: false },
+  PFE:  { current_price: 24.10,  change: 0.30,   change_pct: 1.26,  day_high: 24.40,  day_low: 23.70,  open: 23.90,  previous_close: 23.80,  is_live: false },
+  NEE:  { current_price: 71.20,  change: 0.80,   change_pct: 1.14,  day_high: 71.80,  day_low: 70.10,  open: 70.60,  previous_close: 70.40,  is_live: false },
+  XOM:  { current_price: 108.50, change: 1.30,   change_pct: 1.21,  day_high: 109.10, day_low: 107.00, open: 107.50, previous_close: 107.20, is_live: false },
+};
+
+// ── Preloaded seed news — shown before any query ───────────────────────────────
 const SEED_NEWS = [
   { ticker: "NVDA", headline: "NVIDIA posts record data-center revenue as AI chip demand accelerates", time: "2h ago", sentiment: "bullish" },
   { ticker: "AAPL", headline: "Apple expands services revenue to new high with Vision Pro ecosystem growth", time: "3h ago", sentiment: "bullish" },
   { ticker: "TSLA", headline: "Tesla Q1 deliveries miss analyst estimates amid production retooling", time: "4h ago", sentiment: "bearish" },
-  { ticker: "GME", headline: "GameStop exploring crypto and collectibles pivot as core game sales slide", time: "5h ago", sentiment: "neutral" },
-  { ticker: "JPM", headline: "JPMorgan beats earnings expectations on strong investment banking fees", time: "6h ago", sentiment: "bullish" },
-  { ticker: "BA", headline: "Boeing faces fresh FAA scrutiny over 737 MAX quality-control gaps", time: "7h ago", sentiment: "bearish" },
+  { ticker: "GME",  headline: "GameStop exploring crypto and collectibles pivot as core game sales slide", time: "5h ago", sentiment: "neutral" },
+  { ticker: "JPM",  headline: "JPMorgan beats earnings expectations on strong investment banking fees", time: "6h ago", sentiment: "bullish" },
+  { ticker: "BA",   headline: "Boeing faces fresh FAA scrutiny over 737 MAX quality-control gaps", time: "7h ago", sentiment: "bearish" },
   { ticker: "PLTR", headline: "Palantir wins $480M US Army AI contract, shares jump 8% in after-hours", time: "8h ago", sentiment: "bullish" },
-  { ticker: "PFE", headline: "Pfizer cuts full-year guidance as COVID vaccine demand continues to fade", time: "9h ago", sentiment: "bearish" },
-  { ticker: "NEE", headline: "NextEra Energy secures $2B offshore wind project off Florida coast", time: "10h ago", sentiment: "bullish" },
-  { ticker: "XOM", headline: "ExxonMobil raises dividend as Permian Basin output hits 25-year high", time: "11h ago", sentiment: "bullish" },
+  { ticker: "PFE",  headline: "Pfizer cuts full-year guidance as COVID vaccine demand continues to fade", time: "9h ago", sentiment: "bearish" },
+  { ticker: "NEE",  headline: "NextEra Energy secures $2B offshore wind project off Florida coast", time: "10h ago", sentiment: "bullish" },
+  { ticker: "XOM",  headline: "ExxonMobil raises dividend as Permian Basin output hits 25-year high", time: "11h ago", sentiment: "bullish" },
 ];
 
 // ── Subcomponents ─────────────────────────────────────────────────────────────
@@ -44,14 +59,13 @@ function RiskGauge({ score, size = 100 }) {
   const rad = (angle * Math.PI) / 180;
   const nx = cx + r * Math.cos(rad);
   const ny = cy + r * Math.sin(rad);
-  const arcLen = Math.PI * r;
   return (
     <svg width={s} height={s * 0.65} viewBox={`0 0 ${s} ${s * 0.65}`}>
       <path d={`M ${cx - r} ${cy} A ${r} ${r} 0 0 1 ${cx + r} ${cy}`}
         fill="none" stroke="#1a2535" strokeWidth={s * 0.08} strokeLinecap="round" />
       <path d={`M ${cx - r} ${cy} A ${r} ${r} 0 0 1 ${cx + r} ${cy}`}
         fill="none" stroke={color} strokeWidth={s * 0.08} strokeLinecap="round"
-        strokeDasharray={`${(score / 100) * arcLen} ${arcLen}`} />
+        strokeDasharray={`${(score / 100) * Math.PI * r} ${Math.PI * r}`} />
       <line x1={cx} y1={cy} x2={nx} y2={ny} stroke={color} strokeWidth="2" strokeLinecap="round" />
       <circle cx={cx} cy={cy} r="3" fill={color} />
       <text x={cx} y={cy - r * 0.3} textAnchor="middle" fill={color} fontSize={s * 0.115} fontWeight="700">{score}%</text>
@@ -64,11 +78,7 @@ function MiniChart({ data, positive }) {
   const min = Math.min(...data), max = Math.max(...data);
   const range = max - min || 1;
   const W = 400, H = 80;
-  const pts = data.map((v, i) => {
-    const x = (i / (data.length - 1)) * W;
-    const y = H - ((v - min) / range) * (H - 8) - 4;
-    return `${x},${y}`;
-  }).join(" ");
+  const pts = data.map((v, i) => `${(i / (data.length - 1)) * W},${H - ((v - min) / range) * (H - 8) - 4}`).join(" ");
   const color = positive ? "#00ff9d" : "#ff4d6d";
   return (
     <svg width="100%" height={H} viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" style={{ display: "block" }}>
@@ -100,21 +110,15 @@ function SentimentBar({ label, bullish, bearish, neutral }) {
   );
 }
 
-// ── Multi-ticker price card ───────────────────────────────────────────────────
 function TickerPriceCard({ tickerSymbol, priceData, insight }) {
   const price = priceData;
   const up = (price?.change ?? 0) >= 0;
   const riskPct = insight?.risk_percentage ?? 0;
   return (
-    <div style={{
-      background: "#0d1825", border: "1px solid #1a2d45", borderRadius: 10,
-      padding: "10px 14px", minWidth: 150, flex: "1 1 150px",
-    }}>
+    <div style={{ background: "#0d1825", border: "1px solid #1a2d45", borderRadius: 10, padding: "10px 14px", minWidth: 150, flex: "1 1 150px" }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 4 }}>
         <span style={{ fontSize: 12, fontWeight: 700, color: "#00ff9d", fontFamily: "'JetBrains Mono', monospace" }}>{tickerSymbol}</span>
-        {riskPct > 0 && (
-          <span style={{ fontSize: 10, color: RISK_COLOR(riskPct), fontFamily: "monospace" }}>Risk {riskPct}%</span>
-        )}
+        {riskPct > 0 && <span style={{ fontSize: 10, color: RISK_COLOR(riskPct), fontFamily: "monospace" }}>Risk {riskPct}%</span>}
       </div>
       {price ? (
         <>
@@ -139,7 +143,6 @@ function TickerPriceCard({ tickerSymbol, priceData, insight }) {
   );
 }
 
-// ── Ticker Carousel ───────────────────────────────────────────────────────────
 function TickerCarousel({ livePrices }) {
   const tickers = [...SEED_TICKERS, ...SEED_TICKERS];
   return (
@@ -154,8 +157,8 @@ function TickerCarousel({ livePrices }) {
             </div>
           );
           const pos = (d.change ?? d.change_pct ?? 0) >= 0;
-          const p = d.current_price ?? d.price ?? 0;
-          const pct = Math.abs(d.change_pct ?? d.pct ?? 0);
+          const p = d.current_price ?? 0;
+          const pct = Math.abs(d.change_pct ?? 0);
           return (
             <div key={i} style={styles.tickerItem}>
               <span style={styles.tickerSymbol}>{t}</span>
@@ -174,42 +177,56 @@ function TickerCarousel({ livePrices }) {
 // ── Main App ──────────────────────────────────────────────────────────────────
 export default function App() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [sidebarSearch, setSidebarSearch] = useState("");
   const [query, setQuery] = useState("");
   const [messages, setMessages] = useState([]);
   const [loading, setLoading] = useState(false);
   const [sessionId, setSessionId] = useState(null);
+  // chatHistory entries: { id, title, ts, messages, activeResponse, sessionId }
   const [chatHistory, setChatHistory] = useState([]);
   const [activeTab, setActiveTab] = useState(null);
   const [activeResponse, setActiveResponse] = useState(null);
-  const [livePrices, setLivePrices] = useState({});
+  // Initialise with mock prices so carousel is populated instantly
+  const [livePrices, setLivePrices] = useState(MOCK_PRICES);
   const messagesEndRef = useRef(null);
   const inputRef = useRef(null);
 
-  const fetchTickerPrice = useCallback(async (t) => {
-    try {
-      const res = await fetch(`${API_BASE}/query`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ question: `price of ${t}`, ticker: t }),
-      });
-      const data = await res.json();
-      if (data.price?.current_price) {
-        setLivePrices(prev => ({ ...prev, [t]: data.price }));
-      }
-    } catch (_) {}
+  // ── On mount: fetch all seed prices in parallel via /api/prices ───────────
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await fetch(`${API_BASE}/prices`);
+        if (!res.ok) return;
+        const data = await res.json();
+        // data: { AAPL: {...}, NVDA: {...}, ... }
+        setLivePrices(prev => ({ ...prev, ...data }));
+      } catch (_) {}
+    })();
+    // Re-fetch every 60s to keep carousel fresh
+    const interval = setInterval(async () => {
+      try {
+        const res = await fetch(`${API_BASE}/prices`);
+        if (!res.ok) return;
+        const data = await res.json();
+        setLivePrices(prev => ({ ...prev, ...data }));
+      } catch (_) {}
+    }, 60_000);
+    return () => clearInterval(interval);
   }, []);
 
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      for (let i = 0; i < SEED_TICKERS.length; i++) {
-        if (cancelled) break;
-        await fetchTickerPrice(SEED_TICKERS[i]);
-        await new Promise(r => setTimeout(r, 800));
-      }
-    })();
-    return () => { cancelled = true; };
-  }, [fetchTickerPrice]);
+  // ── Fetch prices for a specific set of tickers in parallel ────────────────
+  const fetchPricesFor = useCallback(async (tickers) => {
+    if (!tickers || tickers.length === 0) return;
+    // Only fetch tickers we don't have live data for yet
+    const missing = tickers.filter(t => !livePrices[t] || !livePrices[t].is_live);
+    if (missing.length === 0) return;
+    try {
+      const res = await fetch(`${API_BASE}/prices?tickers=${missing.join(",")}`);
+      if (!res.ok) return;
+      const data = await res.json();
+      setLivePrices(prev => ({ ...prev, ...data }));
+    } catch (_) {}
+  }, [livePrices]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -246,12 +263,21 @@ export default function App() {
       const newSession = data.session_id || sessionId || crypto.randomUUID();
       if (!sessionId) {
         setSessionId(newSession);
-        setChatHistory(prev => [{ id: newSession, title: userMsg.slice(0, 40), ts: Date.now() }, ...prev]);
       }
 
+      // Cache single-stock price immediately
       if (data.price?.current_price && data.ticker) {
-        setLivePrices(prev => ({ ...prev, [data.ticker]: data.price }));
+        setLivePrices(prev => ({ ...prev, [data.ticker]: { ...data.price, is_live: true } }));
       }
+
+      // For multi-ticker responses, fetch missing prices in parallel right now
+      const involvedTickers = data.tickers?.length > 0
+        ? data.tickers
+        : (data.narrative?.ticker_insights || []).map(ti => ti.ticker);
+      if (involvedTickers.length > 1) {
+        fetchPricesFor(involvedTickers);
+      }
+
       setActiveResponse(data);
 
       const n = data.narrative || {};
@@ -273,15 +299,37 @@ export default function App() {
         ? (data.tickers || []).join(" vs ")
         : data.ticker;
 
-      setMessages(prev => [...prev, {
+      const assistantMsg = {
         role: "assistant", content,
         ticker: displayTicker,
         tickers: data.tickers || (data.ticker ? [data.ticker] : []),
         riskScore: data.risk_score?.risk_percentage ?? n.risk_percentage ?? null,
         sentiment: n.risk_level || null,
-        session: newSession,
         queryType: data.query_type,
-      }]);
+      };
+
+      setMessages(prev => {
+        const updated = [...prev, assistantMsg];
+        // Save full conversation snapshot to history
+        setChatHistory(hist => {
+          const existingIdx = hist.findIndex(h => h.id === newSession);
+          const entry = {
+            id: newSession,
+            title: userMsg.slice(0, 45),
+            ts: Date.now(),
+            messages: updated,
+            activeResponse: data,
+            sessionId: newSession,
+          };
+          if (existingIdx >= 0) {
+            const next = [...hist];
+            next[existingIdx] = entry;
+            return next;
+          }
+          return [entry, ...hist];
+        });
+        return updated;
+      });
       setActiveTab("price");
 
     } catch (err) {
@@ -293,22 +341,33 @@ export default function App() {
     } finally {
       setLoading(false);
     }
-  }, [query, loading, sessionId]);
+  }, [query, loading, sessionId, fetchPricesFor]);
 
   const handleKeyDown = (e) => {
     if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSubmit(); }
   };
 
+  // ── Start a brand-new empty chat ─────────────────────────────────────────
   const startNewChat = async () => {
     if (sessionId) {
       try { await fetch(`${API_BASE}/session/${sessionId}`, { method: "DELETE" }); } catch (_) {}
     }
     setMessages([]); setSessionId(null); setActiveResponse(null);
-    setActiveTab(null); setSidebarOpen(false);
+    setActiveTab(null); setSidebarOpen(false); setSidebarSearch("");
     inputRef.current?.focus();
   };
 
-  // ── Derived display state ─────────────────────────────────────────────────
+  // ── Restore a previous chat from history ─────────────────────────────────
+  const loadChat = (entry) => {
+    setSessionId(entry.sessionId);
+    setMessages(entry.messages || []);
+    setActiveResponse(entry.activeResponse || null);
+    setActiveTab(entry.activeResponse ? "price" : null);
+    setSidebarOpen(false);
+    setSidebarSearch("");
+  };
+
+  // ── Derived state ─────────────────────────────────────────────────────────
   const isMultiTicker = activeResponse &&
     ["comparison", "cross_portfolio", "general"].includes(activeResponse.query_type);
   const ticker = activeResponse?.ticker;
@@ -317,7 +376,6 @@ export default function App() {
   const price = activeResponse?.price || null;
   const hasConversation = messages.length > 0;
 
-  // Multi-ticker: zip ticker_insights with livePrices
   const multiTickerData = isMultiTicker
     ? (activeResponse?.narrative?.ticker_insights || []).map(ti => ({
         ticker: ti.ticker,
@@ -326,7 +384,6 @@ export default function App() {
       }))
     : [];
 
-  // Sparkline for single-stock
   const sparklineData = price ? (() => {
     const { open = 0, day_low = 0, day_high = 0, current_price = 0 } = price;
     const pts = Array.from({ length: 20 }, (_, i) => {
@@ -339,7 +396,6 @@ export default function App() {
     return pts;
   })() : [];
 
-  // Sentiment data (single-stock only, from retrieved_docs)
   const sentimentData = (() => {
     if (!activeResponse?.retrieved_docs) return null;
     const { news = [], social = [], reddit_buzz = [] } = activeResponse.retrieved_docs;
@@ -367,14 +423,13 @@ export default function App() {
       : 50;
     const secBullPct = (narrative.contradictions || "").length > 20 ? 40 : 60;
     return {
-      news: { bullish: newsBullPct, bearish: newsBearPct, neutral: Math.max(0, 100 - newsBullPct - newsBearPct) },
+      news:   { bullish: newsBullPct, bearish: newsBearPct, neutral: Math.max(0, 100 - newsBullPct - newsBearPct) },
       social: { bullish: socialBullPct, bearish: Math.max(0, 100 - socialBullPct - 12), neutral: 12 },
       reddit: { bullish: redditBullPct, bearish: Math.max(0, 100 - redditBullPct - 15), neutral: 15 },
-      sec: { bullish: secBullPct, bearish: Math.max(0, 100 - secBullPct - 15), neutral: 15 },
+      sec:    { bullish: secBullPct, bearish: Math.max(0, 100 - secBullPct - 15), neutral: 15 },
     };
   })();
 
-  // SEC cards (single-stock)
   const secCards = (() => {
     if (!activeResponse?.retrieved_docs?.sec_filings) return [];
     const seen = new Set();
@@ -386,14 +441,19 @@ export default function App() {
       return {
         type,
         label: { "10-K": "Annual Report", "10-Q": "Quarterly Report", "8-K": "Material Event" }[type] || "Filing",
-        icon: { "10-K": "📄", "10-Q": "📊", "8-K": "⚡" }[type] || "📋",
-        note: (doc.document?.slice(0, 100).trim() || meta.section || "Filing reviewed") + "...",
-        date: meta.filed_date || "recent",
+        icon:  { "10-K": "📄", "10-Q": "📊", "8-K": "⚡" }[type] || "📋",
+        note:  (doc.document?.slice(0, 100).trim() || meta.section || "Filing reviewed") + "...",
+        date:  meta.filed_date || "recent",
       };
     }).filter(Boolean);
   })();
 
   const graphUrl = sessionId ? `${API_BASE}/graph/view/${sessionId}` : null;
+
+  // Filtered history for sidebar search
+  const filteredHistory = sidebarSearch.trim()
+    ? chatHistory.filter(h => h.title.toLowerCase().includes(sidebarSearch.toLowerCase()))
+    : chatHistory;
 
   return (
     <div style={styles.root}>
@@ -411,22 +471,47 @@ export default function App() {
             <div style={styles.logoSub}>Financial Intelligence Engine</div>
           </div>
           <button style={styles.newChatBtn} onClick={startNewChat}>＋ New Chat</button>
+
+          {/* Functional search */}
           <div style={styles.sidebarSearch}>
-            <input style={styles.sidebarSearchInput} placeholder="Search history…" readOnly />
+            <input
+              style={styles.sidebarSearchInput}
+              placeholder="Search history…"
+              value={sidebarSearch}
+              onChange={e => setSidebarSearch(e.target.value)}
+            />
           </div>
-          <div style={styles.historyLabel}>Recent</div>
+
+          <div style={styles.historyLabel}>
+            Recent {sidebarSearch && `· ${filteredHistory.length} result${filteredHistory.length !== 1 ? "s" : ""}`}
+          </div>
           <div style={styles.historyList}>
-            {chatHistory.length === 0
-              ? <div style={styles.historyEmpty}>No history yet</div>
-              : chatHistory.map(h => (
-                <div key={h.id} style={styles.historyItem}>
+            {filteredHistory.length === 0 ? (
+              <div style={styles.historyEmpty}>
+                {sidebarSearch ? "No matching chats" : "No history yet"}
+              </div>
+            ) : (
+              filteredHistory.map(h => (
+                <div
+                  key={h.id}
+                  style={{
+                    ...styles.historyItem,
+                    background: h.id === sessionId ? "#0f2030" : "transparent",
+                    border: h.id === sessionId ? "1px solid #1a3050" : "1px solid transparent",
+                  }}
+                  onClick={() => loadChat(h)}
+                >
                   <span style={styles.historyIcon}>💬</span>
-                  <div>
+                  <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={styles.historyTitle}>{h.title}</div>
                     <div style={styles.historyTime}>{new Date(h.ts).toLocaleTimeString()}</div>
                   </div>
+                  {h.id === sessionId && (
+                    <div style={{ width: 6, height: 6, borderRadius: "50%", background: "#00ff9d", flexShrink: 0, marginTop: 4 }} />
+                  )}
                 </div>
-              ))}
+              ))
+            )}
           </div>
           <div style={styles.sidebarFooter}>
             <div style={styles.footerDot} />
@@ -624,9 +709,7 @@ export default function App() {
                         <div style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 5 }}>
                           <span style={{ fontSize: 12, fontWeight: 700, color: "#00ff9d", fontFamily: "monospace", minWidth: 50 }}>{t}</span>
                           <span style={{ fontSize: 11, fontWeight: 600, color: sc }}>{insight.sentiment_label}</span>
-                          <span style={{ fontSize: 10, color: RISK_COLOR(insight.risk_percentage ?? 0), marginLeft: "auto" }}>
-                            Risk {insight.risk_percentage ?? 0}%
-                          </span>
+                          <span style={{ fontSize: 10, color: RISK_COLOR(insight.risk_percentage ?? 0), marginLeft: "auto" }}>Risk {insight.risk_percentage ?? 0}%</span>
                         </div>
                         <div style={{ height: 6, background: "#1a2d45", borderRadius: 3, overflow: "hidden" }}>
                           <div style={{ width: `${(insight.relevance_score ?? 0.5) * 100}%`, background: sc, height: "100%", transition: "width 0.5s" }} />
@@ -657,10 +740,10 @@ export default function App() {
                   </div>
                   <div style={styles.riskBreakdown}>
                     {[
-                      { label: "News Signal Risk", score: sentimentData?.news.bearish ?? 0 },
+                      { label: "News Signal Risk",  score: sentimentData?.news.bearish ?? 0 },
                       { label: "Social Volatility", score: sentimentData?.social.bearish ?? 0 },
-                      { label: "Reddit Momentum", score: sentimentData ? (100 - sentimentData.reddit.bullish) : 0 },
-                      { label: "SEC Filing Flags", score: secCards.length > 0 ? Math.min(90, secCards.length * 25) : 0 },
+                      { label: "Reddit Momentum",   score: sentimentData ? (100 - sentimentData.reddit.bullish) : 0 },
+                      { label: "SEC Filing Flags",  score: secCards.length > 0 ? Math.min(90, secCards.length * 25) : 0 },
                     ].map(r => (
                       <div key={r.label} style={styles.riskRow}>
                         <span style={styles.riskRowLabel}>{r.label}</span>
@@ -796,9 +879,9 @@ const styles = {
   historyLabel: { padding: "0 16px 8px", fontSize: 10, color: "#3a5070", textTransform: "uppercase", letterSpacing: 1 },
   historyList: { flex: 1, overflowY: "auto", padding: "0 8px" },
   historyEmpty: { padding: "20px 12px", fontSize: 12, color: "#3a5070", textAlign: "center" },
-  historyItem: { display: "flex", alignItems: "flex-start", gap: 10, padding: "10px 12px", borderRadius: 8, cursor: "pointer", marginBottom: 2 },
+  historyItem: { display: "flex", alignItems: "flex-start", gap: 10, padding: "10px 12px", borderRadius: 8, cursor: "pointer", marginBottom: 2, transition: "background 0.15s" },
   historyIcon: { fontSize: 14, marginTop: 1 },
-  historyTitle: { fontSize: 12, color: "#8aa8c0", lineHeight: 1.4, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 170 },
+  historyTitle: { fontSize: 12, color: "#8aa8c0", lineHeight: 1.4, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 160 },
   historyTime: { fontSize: 10, color: "#3a5070", marginTop: 2 },
   sidebarFooter: { padding: "12px 20px", borderTop: "1px solid #1a2d45", display: "flex", alignItems: "center", gap: 8 },
   footerDot: { width: 7, height: 7, borderRadius: "50%", background: "#00ff9d" },
