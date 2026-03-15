@@ -480,7 +480,7 @@ export default function App() {
         {/* ── Sidebar ── */}
         <div style={{ ...styles.sidebar, transform: sidebarOpen ? "translateX(0)" : "translateX(-100%)" }}>
           <div style={styles.sidebarHeader}>
-            <div style={styles.logo}>ΑΛΕΧIS</div>
+            <div style={styles.logo}>CogniTrade</div>
             <div style={styles.logoSub}>Financial Intelligence Engine</div>
           </div>
           <button style={styles.newChatBtn} onClick={startNewChat}>＋ New Chat</button>
@@ -536,7 +536,7 @@ export default function App() {
         <div style={styles.chatArea}>
           {!hasConversation ? (
             <div style={styles.welcome}>
-              <div style={styles.welcomeLogo}>ΑΛΕΧIS</div>
+              <div style={styles.welcomeLogo}>CogniTrade</div>
               <div style={styles.welcomeSub}>Financial Intelligence Engine</div>
               <div style={styles.welcomeHint}>Ask me anything about the watchlist stocks</div>
               <div style={styles.quickPrompts}>
