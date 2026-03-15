@@ -18,9 +18,38 @@
 10. [Output Schema](#-output-schema)
 11. [Project Structure](#-project-structure)
 12. [Technology Stack](#-technology-stack)
-13. [Evaluation Guide for Judges](#-evaluation-guide-for-judges)
 
 ---
+
+⚡ Short summary — System at a Glance
+The Financial RAG Reasoning Engine is a multi-source financial intelligence system that answers natural language questions about stocks by fusing 5 data layers — live news, social media sentiment, official SEC filings, real-time prices, and Reddit buzz — and synthesising them into a structured analysis using GPT-4.1.
+The core idea: The most valuable financial signal is the contradiction between what a company officially discloses to regulators and what retail investors believe. The system is built specifically to detect and surface these gaps.
+
+What it does in one query
+"Is Tesla risky right now?"
+        │
+        ├── Fetches Tesla's 10-K risk factors from SEC EDGAR
+        ├── Checks Reddit momentum (ApeWisdom rank + trend)
+        ├── Retrieves recent news articles via Finnhub
+        ├── Pulls live market price
+        └── GPT-4.1 reasons across all layers → structured JSON output
+                  sentiment: MIXED
+                  risk_score: HIGH
+                  key_contradiction: "10-K warns of EV competition pressure
+                                      while Reddit buzz is RISING (#4 rank)"
+
+Architecture in brief
+
+| Layer | Source | What it provides |
+|-----------|-----------|-------|
+| 1 — NewsFinnhub | API | Recent articles, fundamental events |
+| 2 — SocialCurated | dataset (mock data social.json) | Retail investor posts, engagement-weighted |
+| 3 — SEC Filings | SEC EDGAR (free) | 10-K, 10-Q, 8-K — official risk disclosures (insider informations) |
+| 4 — Live PriceFinnhub | API | Real-time price, change %, market cap |
+| 5 — Reddit Buzz | ApeWisdom (free) | r/wallstreetbets rank, mentions, momentum (idenx that shows popularity stock rates in reddit) |
+
+All 5 layers are retrieved in parallel per query. GPT-4.1 applies a 5-step Chain-of-Thought reasoning process and returns a Pydantic-validated JSON response with sentiment, risk score, and the key contradiction detected. Every query also produces an interactive knowledge graph (nodes: Company, Filing, Sentiment, Event, Price) viewable in the browser.
+The system ships as a 3-container Docker stack (ChromaDB + FastAPI backend + React frontend) and is operational with a single docker compose up --build.
 
 ## 💡 Concept Overview
 
@@ -672,3 +701,6 @@ Follow-up resolution (when `session_id` provided):
 | ApeWisdom | ❌ No | Free | Reddit buzz signals |
 
 ---
+Developed by :
+- Pavlos Margaritis 
+- Alexandros Christodoulou
